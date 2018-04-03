@@ -14,6 +14,7 @@
 * long running thread support or needed?
 * missing @PathParam, validation error not clear?
 * support websocket?
+* log mask, whether impl strong typed way filter, since only json body http header need to be masked potentially?
 
 ### jdk 9 incompatible list
 * spotbugs: OBL bug https://github.com/spotbugs/spotbugs/issues/432  
@@ -22,3 +23,5 @@
 
 ### jdk 10
 * remove core.framework.util.Threads.availableProcessors, check default behavior and -XX:ActiveProcessorCount
+* class in interface module generates Validator make interface depends on core-ng module (java module)
+* spotbugs: can't fun under java 10, https://github.com/spotbugs/spotbugs/issues/593

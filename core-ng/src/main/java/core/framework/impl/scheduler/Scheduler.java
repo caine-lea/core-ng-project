@@ -81,10 +81,9 @@ public final class Scheduler {
     void submitJob(Trigger trigger, boolean trace) {
         jobExecutor.submit(() -> {
             try {
-                logManager.begin("=== job execution begin ===");
+                ActionLog actionLog = logManager.begin("=== job execution begin ===");
                 String name = trigger.name();
-                ActionLog actionLog = logManager.currentActionLog();
-                actionLog.action("job/" + name);
+                actionLog.action("job:" + name);
                 if (trace) {
                     actionLog.trace = true;
                 }

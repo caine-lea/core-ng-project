@@ -7,7 +7,9 @@ import core.framework.http.HTTPClientException;
 import core.framework.http.HTTPMethod;
 import core.framework.http.HTTPRequest;
 import core.framework.http.HTTPResponse;
-import core.framework.impl.log.param.BytesParam;
+import core.framework.impl.log.filter.BytesParam;
+import core.framework.impl.log.filter.FieldParam;
+import core.framework.impl.log.filter.JSONParam;
 import core.framework.log.ActionLogContext;
 import core.framework.log.Markers;
 import core.framework.util.Charsets;
@@ -119,7 +121,7 @@ public final class HTTPClientImpl implements HTTPClient {
         }
 
         request.headers().forEach((name, value) -> {
-            logger.debug("[request:header] {}={}", name, value);
+            logger.debug("[request:header] {}={}", name, new FieldParam(name, value));
             builder.setHeader(name, value);
         });
 
@@ -131,12 +133,22 @@ public final class HTTPClientImpl implements HTTPClient {
         byte[] body = request.body();
         if (body != null) {
             ContentType contentType = request.contentType();
-            logger.debug("[request] contentType={}, body={}", contentType, new BytesParam(request.body()));
+            logRequestBody(request, contentType);
             org.apache.http.entity.ContentType type = org.apache.http.entity.ContentType.create(contentType.mediaType(), contentType.charset().orElse(null));
             builder.setEntity(new ByteArrayEntity(request.body(), type));
         }
 
         return builder.build();
+    }
+
+    private void logRequestBody(HTTPRequest request, ContentType contentType) {
+        Object bodyParam;
+        if (ContentType.APPLICATION_JSON.mediaType().equals(contentType.mediaType())) {
+            bodyParam = new JSONParam(request.body(), contentType.charset().orElse(Charsets.UTF_8));
+        } else {
+            bodyParam = new BytesParam(request.body());
+        }
+        logger.debug("[request] contentType={}, body={}", contentType, bodyParam);
     }
 
     byte[] responseBody(HttpEntity entity) throws IOException {

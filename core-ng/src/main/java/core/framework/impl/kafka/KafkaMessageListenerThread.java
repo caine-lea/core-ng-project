@@ -2,7 +2,7 @@ package core.framework.impl.kafka;
 
 import core.framework.impl.log.ActionLog;
 import core.framework.impl.log.LogManager;
-import core.framework.impl.log.param.BytesParam;
+import core.framework.impl.log.filter.BytesParam;
 import core.framework.kafka.Message;
 import core.framework.log.Markers;
 import core.framework.util.Charsets;
@@ -102,10 +102,9 @@ class KafkaMessageListenerThread extends Thread {
 
     private <T> void handle(String topic, KafkaMessageListener.MessageHandlerHolder<T> holder, List<ConsumerRecord<String, byte[]>> records, double longProcessThresholdInNano) {
         for (ConsumerRecord<String, byte[]> record : records) {
-            logManager.begin("=== message handling begin ===");
-            ActionLog actionLog = logManager.currentActionLog();
+            ActionLog actionLog = logManager.begin("=== message handling begin ===");
             try {
-                actionLog.action("topic/" + topic);
+                actionLog.action("topic:" + topic);
                 actionLog.context("topic", topic);
                 actionLog.context("handler", holder.handler.getClass().getCanonicalName());
                 actionLog.context("key", record.key());
@@ -139,10 +138,9 @@ class KafkaMessageListenerThread extends Thread {
     }
 
     private <T> void handle(String topic, KafkaMessageListener.BulkMessageHandlerHolder<T> holder, List<ConsumerRecord<String, byte[]>> records, double longProcessThresholdInNano) {
-        logManager.begin("=== message handling begin ===");
-        ActionLog actionLog = logManager.currentActionLog();
+        ActionLog actionLog = logManager.begin("=== message handling begin ===");
         try {
-            actionLog.action("topic/" + topic);
+            actionLog.action("topic:" + topic);
             actionLog.context("topic", topic);
             actionLog.context("handler", holder.handler.getClass().getCanonicalName());
             actionLog.stat("messageCount", records.size());

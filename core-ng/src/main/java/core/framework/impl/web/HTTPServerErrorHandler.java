@@ -3,11 +3,11 @@ package core.framework.impl.web;
 import core.framework.api.http.HTTPStatus;
 import core.framework.api.web.service.ResponseStatus;
 import core.framework.http.ContentType;
+import core.framework.impl.log.ActionLog;
 import core.framework.impl.web.request.RequestImpl;
 import core.framework.impl.web.response.ResponseHandler;
 import core.framework.impl.web.response.ResponseImpl;
 import core.framework.impl.web.service.ErrorResponse;
-import core.framework.log.ActionLogContext;
 import core.framework.log.ErrorCode;
 import core.framework.log.Severity;
 import core.framework.util.Exceptions;
@@ -32,7 +32,7 @@ public class HTTPServerErrorHandler {
         this.responseHandler = responseHandler;
     }
 
-    void handleError(Throwable e, HttpServerExchange exchange, RequestImpl request) {
+    void handleError(Throwable e, HttpServerExchange exchange, RequestImpl request, ActionLog actionLog) {
         if (exchange.isResponseStarted()) {
             logger.error("response was sent, discard the current http transaction");
             return;
@@ -46,24 +46,24 @@ public class HTTPServerErrorHandler {
             }
             if (errorResponse == null) {
                 String accept = exchange.getRequestHeaders().getFirst(Headers.ACCEPT);
-                errorResponse = defaultErrorResponse(e, accept);
+                errorResponse = defaultErrorResponse(e, accept, actionLog);
             }
-            responseHandler.render((ResponseImpl) errorResponse, exchange);
+            responseHandler.render((ResponseImpl) errorResponse, exchange, actionLog);
         } catch (Throwable error) {
             logger.error(error.getMessage(), e);
             if (exchange.isResponseStarted()) {
                 logger.error("failed to render error page, response was sent, discard the current http transaction");
                 return;
             }
-            renderDefaultErrorPage(error, exchange);
+            renderDefaultErrorPage(error, exchange, actionLog);
         }
     }
 
-    private Response defaultErrorResponse(Throwable e, String accept) {
+    private Response defaultErrorResponse(Throwable e, String accept, ActionLog actionLog) {
         HTTPStatus status = httpStatus(e);
 
         if (accept != null && accept.contains(ContentType.APPLICATION_JSON.mediaType())) {
-            return Response.bean(errorResponse(e)).status(status);
+            return Response.bean(errorResponse(e, actionLog.id)).status(status);
         } else {
             return Response.text(errorHTML(e)).status(status).contentType(ContentType.TEXT_HTML);
         }
@@ -80,16 +80,16 @@ public class HTTPServerErrorHandler {
         return "<html><body><h1>Error</h1><p>" + e.getMessage() + "</p><pre>" + Exceptions.stackTrace(e) + "</pre></body></html>";
     }
 
-    private void renderDefaultErrorPage(Throwable e, HttpServerExchange exchange) {
+    private void renderDefaultErrorPage(Throwable e, HttpServerExchange exchange, ActionLog actionLog) {
         exchange.getResponseHeaders().put(Headers.CONTENT_TYPE, ContentType.TEXT_HTML.toString());
         exchange.setStatusCode(HTTPStatus.INTERNAL_SERVER_ERROR.code);
-        ActionLogContext.put("responseCode", exchange.getStatusCode());
+        actionLog.context("responseCode", exchange.getStatusCode());
         exchange.getResponseSender().send(errorHTML(e));
     }
 
-    ErrorResponse errorResponse(Throwable e) {
+    ErrorResponse errorResponse(Throwable e, String actionId) {
         ErrorResponse response = new ErrorResponse();
-        response.id = ActionLogContext.id();
+        response.id = actionId;
         response.message = e.getMessage();
         response.stackTrace = Exceptions.stackTrace(e);
         if (e instanceof ErrorCode) {

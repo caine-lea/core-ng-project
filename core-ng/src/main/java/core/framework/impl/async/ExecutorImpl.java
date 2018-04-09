@@ -37,13 +37,12 @@ public final class ExecutorImpl implements Executor {
     @Override
     public <T> Future<T> submit(String action, Callable<T> task) {
         ActionLog parentActionLog = logManager.currentActionLog();
-        String taskAction = parentActionLog.action + "/" + action;
+        String taskAction = parentActionLog.action + ":" + action;
         String refId = parentActionLog.refId();
         boolean trace = parentActionLog.trace;
         return executor.submit(() -> {
             try {
-                logManager.begin("=== task execution begin ===");
-                ActionLog actionLog = logManager.currentActionLog();
+                ActionLog actionLog = logManager.begin("=== task execution begin ===");
                 actionLog.refId(refId);
                 actionLog.action(taskAction);
                 if (trace) {

@@ -18,5 +18,4 @@ public final class Classes {
         }
         return instanceFields;      // even though according to JDK doc, the fields returned is not in particular order, but common JDK impl uses order as source code
     }
-
 }

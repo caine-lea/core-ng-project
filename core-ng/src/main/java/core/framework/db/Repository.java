@@ -15,9 +15,17 @@ public interface Repository<T> {
         return query.fetch();
     }
 
-    int count(String where, Object... params);
+    default int count(String where, Object... params) {
+        Query<T> query = select();
+        if (where != null) query.where(where, params);
+        return query.count();
+    }
 
-    Optional<T> selectOne(String where, Object... params);
+    default Optional<T> selectOne(String where, Object... params) {
+        Query<T> query = select();
+        if (where != null) query.where(where, params);
+        return query.fetchOne();
+    }
 
     Optional<T> get(Object... primaryKeys);
 

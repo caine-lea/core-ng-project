@@ -3,26 +3,28 @@ package core.framework.module;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.impl.web.http.ClientIPInterceptor;
-import core.framework.impl.web.http.LimitRateInterceptor;
 import core.framework.util.Exceptions;
 import core.framework.web.ErrorHandler;
 import core.framework.web.Interceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Set;
+import java.util.Arrays;
 
 /**
  * @author neo
  */
-public final class HTTPConfig {
+public final class HTTPConfig extends Config {
     private final Logger logger = LoggerFactory.getLogger(HTTPConfig.class);
-    private final ModuleContext context;
-    private final State state;
+    private ModuleContext context;
 
-    HTTPConfig(ModuleContext context) {
+    @Override
+    protected void initialize(ModuleContext context, String name) {
         this.context = context;
-        state = context.config.state("http", State::new);
+    }
+
+    @Override
+    protected void validate() {
     }
 
     public void httpPort(int port) {
@@ -42,11 +44,7 @@ public final class HTTPConfig {
     }
 
     public LimitRateConfig limitRate() {
-        if (state.limitRateInterceptor == null) {
-            state.limitRateInterceptor = new LimitRateInterceptor();
-            intercept(state.limitRateInterceptor);
-        }
-        return new LimitRateConfig(state);
+        return context.config(LimitRateConfig.class, null);
     }
 
     /**
@@ -63,26 +61,14 @@ public final class HTTPConfig {
     /**
      * Set cidr blocks to filter ingress ip, e.g. 192.168.0.1/24 or 192.168.1.1/32 for single ip
      *
-     * @param cidrs cidr block
+     * @param cidrs cidr blocks
      */
-    public void allowClientIP(Set<String> cidrs) {
-        logger.info("only allow remote access from {}", cidrs);
+    public void allowCIDR(String... cidrs) {
+        logger.info("limit remote access, cidrs={}", Arrays.toString(cidrs));
         context.httpServer.handler.interceptors.add(new ClientIPInterceptor(cidrs));
     }
 
     public void enableGZip() {
         context.httpServer.gzip = true;
-    }
-
-    public static class State implements Config.State {
-        LimitRateInterceptor limitRateInterceptor;
-        boolean limitRateGroupAdded;
-
-        @Override
-        public void validate() {
-            if (limitRateInterceptor != null && !limitRateGroupAdded) {
-                throw new Error("limitRate() is configured but no group added, please remove unnecessary config");
-            }
-        }
     }
 }

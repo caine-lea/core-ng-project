@@ -24,8 +24,24 @@ import java.time.Duration;
 /**
  * @author neo
  */
-public final class CacheConfig {
-    static String cacheName(String name, Type valueType) {
+public class CacheConfig extends Config {
+    private final Logger logger = LoggerFactory.getLogger(CacheConfig.class);
+    private ModuleContext context;
+    private CacheManager cacheManager;
+
+    @Override
+    protected void initialize(ModuleContext context, String name) {
+        this.context = context;
+    }
+
+    @Override
+    protected void validate() {
+        if (cacheManager.caches().isEmpty()) {
+            throw new Error("cache is configured but no cache added, please remove unnecessary config");
+        }
+    }
+
+    String cacheName(String name, Type valueType) {
         if (name != null) return name;
         if (valueType instanceof Class) {
             return ASCII.toLowerCase(((Class<?>) valueType).getSimpleName());
@@ -42,18 +58,9 @@ public final class CacheConfig {
         return ASCII.toLowerCase(valueType.getTypeName());
     }
 
-    private final Logger logger = LoggerFactory.getLogger(CacheConfig.class);
-    private final ModuleContext context;
-    private final State state;
-
-    CacheConfig(ModuleContext context) {
-        this.context = context;
-        state = context.config.state("cache", State::new);
-    }
-
     public void local() {
-        if (state.cacheManager != null)
-            throw new Error("cache() is already configured, please configure cache store only once");
+        if (cacheManager != null)
+            throw new Error("cache is already configured, please configure cache store only once");
 
         logger.info("create local cache store");
         LocalCacheStore cacheStore = new LocalCacheStore();
@@ -63,55 +70,43 @@ public final class CacheConfig {
     }
 
     public void redis(String host) {
-        if (state.cacheManager != null)
-            throw new Error("cache() is already configured, please configure cache store only once");
+        if (cacheManager != null)
+            throw new Error("cache is already configured, please configure cache store only once");
 
-        if (context.isTest()) {
-            logger.info("use local cache during test");
-            local();
-        } else {
-            logger.info("create redis cache manager, host={}", host);
+        configureRedis(host);
+    }
 
-            RedisImpl redis = new RedisImpl("redis-cache");
-            redis.host = host;
-            redis.timeout(Duration.ofSeconds(1));   // for cache, use shorter timeout than default redis config
-            context.shutdownHook.add(redis::close);
-            context.backgroundTask().scheduleWithFixedDelay(redis.pool::refresh, Duration.ofMinutes(5));
-            context.stat.metrics.add(new PoolMetrics(redis.pool));
-            configureCacheManager(new RedisCacheStore(redis));
-        }
+    void configureRedis(String host) {
+        logger.info("create redis cache manager, host={}", host);
+
+        RedisImpl redis = new RedisImpl("redis-cache");
+        redis.host = host;
+        redis.timeout(Duration.ofSeconds(1));   // for cache, use shorter timeout than default redis config
+        context.shutdownHook.add(redis::close);
+        context.backgroundTask().scheduleWithFixedDelay(redis.pool::refresh, Duration.ofMinutes(5));
+        context.stat.metrics.add(new PoolMetrics(redis.pool));
+        configureCacheManager(new RedisCacheStore(redis));
     }
 
     private void configureCacheManager(CacheStore cacheStore) {
-        state.cacheManager = new CacheManager(cacheStore);
+        cacheManager = new CacheManager(cacheStore);
 
-        CacheController controller = new CacheController(state.cacheManager);
+        CacheController controller = new CacheController(cacheManager);
         context.route(HTTPMethod.GET, "/_sys/cache", controller::list, true);
         context.route(HTTPMethod.GET, "/_sys/cache/:name/:key", controller::get, true);
         context.route(HTTPMethod.DELETE, "/_sys/cache/:name/:key", controller::delete, true);
     }
 
     public void add(String name, Type valueType, Duration duration) {
-        if (state.cacheManager == null) throw Exceptions.error("cache() is not configured");
+        if (cacheManager == null) throw Exceptions.error("cache is not configured, please configure cache store first");
 
         String cacheName = cacheName(name, valueType);
-        logger.info("add cache, cacheName={}, valueType={}, beanName={}", cacheName, valueType.getTypeName(), name);
-        Cache<?> cache = state.cacheManager.add(cacheName, valueType, duration);
+        logger.info("add cache, cacheName={}, valueType={}, name={}", cacheName, valueType.getTypeName(), name);
+        Cache<?> cache = cacheManager.add(cacheName, valueType, duration);
         context.beanFactory.bind(Types.generic(Cache.class, valueType), name, cache);
     }
 
     public void add(Type valueType, Duration duration) {
         add(null, valueType, duration);
-    }
-
-    public static class State implements Config.State {
-        CacheManager cacheManager;
-
-        @Override
-        public void validate() {
-            if (cacheManager.caches().isEmpty()) {
-                throw new Error("cache() is configured but no cache added, please remove unnecessary config");
-            }
-        }
     }
 }

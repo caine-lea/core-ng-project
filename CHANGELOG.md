@@ -1,7 +1,48 @@
 ## Change log
-### 6.1.1 (4/4/2018 - )
-* action: simpliy actionId naming scheme, since actionId doesn't need to be used in path anymore
+### 6.3.2 (5/22/2018 - )
+* site: finalize csp design, make img-src supports data:, use sys.webSecurity.trustedSources to configure 
+
+### 6.3.1 (5/16/2018 - 5/22/2018)
+* site: update site.enableWebSecurity(String... trustedSources) to use CSP to replace x-frame-options since it's deprecated 
+* executor: tweak case when task submit another task to executor, to support async long polling or retry use cases 
+
+### 6.3.0 (5/9/2018 - 5/15/2018)
+* http: update undertow to 2.0.7
+* api: make error message more friendly when service method param misses @PathParam
+* config: make Config class stateful, use override style to configure during test
+* search: !!! moved search to core-ng-search/core-ng-search-test modules, use config(SearchConfig.class)/config(InitSearchConfig.class) to configure, refer to log-processor gradle config for dependency config 
+* mongo: !!! moved mongo to core-ng-mongo/core-ng-mong-test modules, use config(MongoConfig.class) to configure
+* db: Query added fetchOne()
+
+### 6.2.2 (5/3/2018)
+* scheduler: log error when trigger returned invalid next execution time
+
+### 6.2.0 (4/25/2018 - 5/1/2018)        !!! only support Java 10+
+* thread: removed core.framework.util.Threads.availableProcessors, since java 10 supports cpu limits well in docker/kube
+* db: update connection max idle timeout to 1 hour, to fit most scenario (e.g. IDC with firewall)  
+* scheduler: removed secondly trigger, replaced with custom trigger to make it more flexible
+* search: update es to 6.2.4 
+* executor: !!! removed built-in Executor binding, please use executor().add(); in config to keep same behavior, 
+            allow executor().add(name, poolSize) to create multiple pools
+
+### 6.1.5 (4/19/2018)
+* bug: fix site().publishAPI(cidrs) not setting cidr correctly
+
+### 6.1.4 (4/16/2018 - 4/17/2018)
+* kafka: added POST /_sys/kafka/topic/:topic/message/:messageId, to allow publish message thru internal management API
+* bug: fix array param format 
+* bug: fix multiple kafka management controller conflict  
+
+### 6.1.2/6.1.3 (4/9/2018 - 4/16/2018)
+* site: added publishAPI() / sys.site.publishAPI.allowCIDR to allow access /sys/_api from trusted network 
+* kafka: update to 1.1.0, add management controller method to increase partition/delete records 
+* search: update es to 6.2.3
+* db: add query.project()
+
+### 6.1.1 (4/4/2018 - 4/9/2018)
+* action: simplify actionId naming scheme, since actionId doesn't need to be used in path anymore
           examples: action=api:patch:/ajax/product/:id, action=http:get:/, action=topic:some-topic, action=job:some-job  
+* api: typescript definition generates string enum
 
 ### 6.1.0 (3/7/2018 - 4/4/2018)
 * kafka: update to 1.0.1, add config to register publisher without topic (instead of passing null)
@@ -15,7 +56,7 @@
 * log: removed write action/trace to file, updated sys.properties log key to sys.log.appender
         sys.log.appender=console => write action/trace to console
         sys.log.appender=kafkaURI => forward log to kafka
-       (in cloud env, console logging is prefered no matter it's docker or systemd/journald, or use log forwarding) 
+       (in cloud env, console logging is preferred no matter it's docker or systemd/journald, or use log forwarding) 
 * http: update undertow to 2.0.1
 
 ### 5.3.8 (2/28/2018 - 3/4/2018)    !!! 5.3.X is last version to support Java 8

@@ -4,10 +4,10 @@ import core.framework.api.web.service.Path;
 import core.framework.http.HTTPClient;
 import core.framework.http.HTTPClientBuilder;
 import core.framework.http.HTTPMethod;
+import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.impl.web.ControllerHolder;
 import core.framework.impl.web.bean.RequestBeanMapper;
-import core.framework.impl.web.management.APIController;
 import core.framework.impl.web.service.HTTPMethods;
 import core.framework.impl.web.service.WebServiceClient;
 import core.framework.impl.web.service.WebServiceClientBuilder;
@@ -15,24 +15,33 @@ import core.framework.impl.web.service.WebServiceControllerBuilder;
 import core.framework.impl.web.service.WebServiceImplValidator;
 import core.framework.impl.web.service.WebServiceInterfaceValidator;
 import core.framework.util.ASCII;
+import core.framework.util.Lists;
 import core.framework.web.Controller;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * @author neo
  */
-public final class APIConfig {
+public class APIConfig extends Config {
+    final List<Class<?>> serviceInterfaces = Lists.newArrayList();
     private final Logger logger = LoggerFactory.getLogger(APIConfig.class);
-    private final ModuleContext context;
-    private final State state;
+    private ModuleContext context;
+    private HTTPClient httpClient;
+    private Duration timeout = Duration.ofSeconds(30);
+    private Duration slowOperationThreshold = Duration.ofSeconds(15);
 
-    APIConfig(ModuleContext context) {
+    @Override
+    protected void initialize(ModuleContext context, String name) {
         this.context = context;
-        state = context.config.state("api", State::new);
+    }
+
+    @Override
+    protected void validate() {
     }
 
     public <T> void service(Class<T> serviceInterface, T service) {
@@ -58,7 +67,7 @@ public final class APIConfig {
             }
         }
 
-        apiController().serviceInterfaces.add(serviceInterface);
+        serviceInterfaces.add(serviceInterface);
     }
 
     public <T> APIClientConfig client(Class<T> serviceInterface, String serviceURL) {
@@ -74,48 +83,29 @@ public final class APIConfig {
     }
 
     public void timeout(Duration timeout) {
-        if (state.httpClient != null) throw new Error("api().timeout() must be configured before adding client");
-        state.timeout = timeout;
+        if (httpClient != null) throw new Error("api timeout must be configured before adding client");
+        this.timeout = timeout;
     }
 
     public void slowOperationThreshold(Duration slowOperationThreshold) {
-        if (state.httpClient != null) throw new Error("api().slowOperationThreshold() must be configured before adding client");
-        state.slowOperationThreshold = slowOperationThreshold;
+        if (httpClient != null) throw new Error("api slowOperationThreshold must be configured before adding client");
+        this.slowOperationThreshold = slowOperationThreshold;
     }
 
-    private <T> T createWebServiceClient(Class<T> serviceInterface, WebServiceClient webServiceClient) {
-        if (context.isTest()) {
-            return context.mockFactory.create(serviceInterface);
-        } else {
-            return new WebServiceClientBuilder<>(serviceInterface, webServiceClient).build();
-        }
+    <T> T createWebServiceClient(Class<T> serviceInterface, WebServiceClient webServiceClient) {
+        return new WebServiceClientBuilder<>(serviceInterface, webServiceClient).build();
     }
 
     private HTTPClient httpClient() {
-        if (state.httpClient == null) {
+        if (httpClient == null) {
             HTTPClient httpClient = new HTTPClientBuilder()
                     .userAgent("APIClient")
-                    .timeout(state.timeout)
-                    .slowOperationThreshold(state.slowOperationThreshold)
+                    .timeout(timeout)
+                    .slowOperationThreshold(slowOperationThreshold)
                     .build();
             context.shutdownHook.add(httpClient::close);
-            state.httpClient = httpClient;
+            this.httpClient = httpClient;
         }
-        return state.httpClient;
-    }
-
-    private APIController apiController() {
-        if (state.apiController == null) {
-            state.apiController = new APIController();
-            context.route(HTTPMethod.GET, "/_sys/api", state.apiController, true);
-        }
-        return state.apiController;
-    }
-
-    public static class State {
-        HTTPClient httpClient;
-        Duration timeout = Duration.ofSeconds(30);
-        Duration slowOperationThreshold = Duration.ofSeconds(15);
-        APIController apiController;
+        return httpClient;
     }
 }

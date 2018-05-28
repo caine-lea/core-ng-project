@@ -1,13 +1,12 @@
 package core.framework.impl.kafka;
 
 import core.framework.impl.json.JSONReader;
-import core.framework.impl.log.LogManager;
 import core.framework.kafka.BulkMessageHandler;
 import core.framework.kafka.MessageHandler;
 import core.framework.util.Exceptions;
 import core.framework.util.Maps;
 import core.framework.util.Sets;
-import core.framework.util.Threads;
+import core.framework.util.StopWatch;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,17 +21,15 @@ public class KafkaMessageListener {
     final Map<String, MessageHandlerHolder<?>> handlerHolders = Maps.newHashMap();
     final Map<String, BulkMessageHandlerHolder<?>> bulkHandlerHolders = Maps.newHashMap();
     final Kafka kafka;
-    final LogManager logManager;
     private final Logger logger = LoggerFactory.getLogger(KafkaMessageListener.class);
     private final String name;
     private final Set<String> topics = Sets.newHashSet();
-    public int poolSize = Threads.availableProcessors() * 4;
+    public int poolSize = Runtime.getRuntime().availableProcessors() * 4;
     private KafkaMessageListenerThread[] listenerThreads;
 
-    KafkaMessageListener(Kafka kafka, String name, LogManager logManager) {
+    KafkaMessageListener(Kafka kafka, String name) {
         this.kafka = kafka;
         this.name = name;
-        this.logManager = logManager;
     }
 
     public <T> void subscribe(String topic, Class<T> messageClass, MessageHandler<T> handler, BulkMessageHandler<T> bulkHandler) {
@@ -46,19 +43,21 @@ public class KafkaMessageListener {
 
     public void start() {
         listenerThreads = new KafkaMessageListenerThread[poolSize];
-        String group = logManager.appName;
+        String group = kafka.logManager.appName;
         for (int i = 0; i < poolSize; i++) {
+            StopWatch watch = new StopWatch();
             String name = "kafka-listener-" + (this.name == null ? "" : this.name + "-") + i;
             Consumer<String, byte[]> consumer = kafka.consumer(group, topics);
             KafkaMessageListenerThread thread = new KafkaMessageListenerThread(name, consumer, this);
             thread.start();
             listenerThreads[i] = thread;
+            logger.info("create kafka listener thread, name={}, topics={}, elapsedTime={}", name, topics, watch.elapsedTime());
         }
-        logger.info("kafka listener started, name={}, uri={}, topics={}", name, kafka.uri, topics);
+        logger.info("kafka listener started, uri={}, topics={}, name={}", kafka.uri, topics, name);
     }
 
     public void stop() {
-        logger.info("stop kafka listener, name={}, uri={}, topics={}", name, kafka.uri, topics);
+        logger.info("stop kafka listener, uri={}, topics={}, name={}", kafka.uri, topics, name);
         if (listenerThreads != null) {
             for (KafkaMessageListenerThread thread : listenerThreads) {
                 thread.shutdown();

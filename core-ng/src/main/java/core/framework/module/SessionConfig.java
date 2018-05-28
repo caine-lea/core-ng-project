@@ -1,5 +1,6 @@
 package core.framework.module;
 
+import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.impl.redis.RedisImpl;
 import core.framework.impl.resource.PoolMetrics;
@@ -13,13 +14,18 @@ import java.time.Duration;
 /**
  * @author neo
  */
-public final class SessionConfig {
+public class SessionConfig extends Config {
     private final Logger logger = LoggerFactory.getLogger(SessionConfig.class);
-    private final ModuleContext context;
+    private ModuleContext context;
 
-    SessionConfig(ModuleContext context) {
+    @Override
+    protected void initialize(ModuleContext context, String name) {
         this.context = context;
         context.logManager.filter.maskedFields.add(context.httpServer.siteManager.sessionManager.sessionId.name);
+    }
+
+    @Override
+    protected void validate() {
     }
 
     public void timeout(Duration timeout) {
@@ -39,18 +45,14 @@ public final class SessionConfig {
     }
 
     public void redis(String host) {
-        if (context.isTest()) {
-            local();
-        } else {
-            logger.info("create redis session provider, host={}", host);
+        logger.info("create redis session provider, host={}", host);
 
-            RedisImpl redis = new RedisImpl("redis-session");
-            redis.host = host;
-            context.backgroundTask().scheduleWithFixedDelay(redis.pool::refresh, Duration.ofMinutes(5));
-            context.stat.metrics.add(new PoolMetrics(redis.pool));
+        RedisImpl redis = new RedisImpl("redis-session");
+        redis.host = host;
+        context.backgroundTask().scheduleWithFixedDelay(redis.pool::refresh, Duration.ofMinutes(5));
+        context.stat.metrics.add(new PoolMetrics(redis.pool));
 
-            context.shutdownHook.add(redis::close);
-            context.httpServer.siteManager.sessionManager.sessionStore(new RedisSessionStore(redis));
-        }
+        context.shutdownHook.add(redis::close);
+        context.httpServer.siteManager.sessionManager.sessionStore(new RedisSessionStore(redis));
     }
 }

@@ -1,8 +1,6 @@
 package core.framework.impl.module;
 
-import core.framework.async.Executor;
 import core.framework.http.HTTPMethod;
-import core.framework.impl.async.ExecutorImpl;
 import core.framework.impl.inject.BeanFactory;
 import core.framework.impl.inject.ShutdownHook;
 import core.framework.impl.log.DefaultLoggerFactory;
@@ -18,31 +16,32 @@ import core.framework.impl.web.management.ThreadInfoController;
 import core.framework.impl.web.route.PathPatternValidator;
 import core.framework.util.ASCII;
 import core.framework.util.Lists;
+import core.framework.util.Maps;
 import core.framework.web.Controller;
 import core.framework.web.WebContext;
 import core.framework.web.site.WebDirectory;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author neo
  */
-public final class ModuleContext {
+public class ModuleContext {
     public final BeanFactory beanFactory;
     public final List<Runnable> startupHook = Lists.newArrayList();
     public final ShutdownHook shutdownHook = new ShutdownHook();
     public final PropertyManager propertyManager = new PropertyManager();
     public final HTTPServer httpServer;
     public final LogManager logManager;
-    public final MockFactory mockFactory;
     public final Stat stat = new Stat();
-    public final Config config = new Config();
+    protected final Map<String, Config> configs = Maps.newHashMap();
     private BackgroundTaskExecutor backgroundTask;
 
-    public ModuleContext(BeanFactory beanFactory, MockFactory mockFactory) {
+    public ModuleContext(BeanFactory beanFactory) {
         this.beanFactory = beanFactory;
-        this.mockFactory = mockFactory;
 
         logManager = ((DefaultLoggerFactory) LoggerFactory.getILoggerFactory()).logManager;
 
@@ -51,15 +50,6 @@ public final class ModuleContext {
         beanFactory.bind(WebDirectory.class, null, httpServer.siteManager.webDirectory);
         startupHook.add(httpServer::start);
         shutdownHook.add(httpServer::stop);
-
-        Executor executor;
-        if (!isTest()) {
-            executor = new ExecutorImpl(logManager);
-            shutdownHook.add(((ExecutorImpl) executor)::stop);
-        } else {
-            executor = mockFactory.create(Executor.class);
-        }
-        beanFactory.bind(Executor.class, null, executor);
 
         route(HTTPMethod.GET, "/_sys/memory", new MemoryUsageController(), true);
         ThreadInfoController threadInfoController = new ThreadInfoController();
@@ -86,7 +76,24 @@ public final class ModuleContext {
         httpServer.handler.route.add(method, path, new ControllerHolder(controller, inspector.targetMethod, inspector.controllerInfo, action, skipInterceptor));
     }
 
-    public boolean isTest() {
-        return mockFactory != null;
+    @SuppressWarnings("unchecked")
+    public <T extends Config> T config(Class<T> configClass, String name) {
+        return (T) configs.computeIfAbsent(configClass.getCanonicalName() + ":" + name, key -> {
+            try {
+                T config = configClass(configClass).getConstructor().newInstance();
+                config.initialize(this, name);
+                return config;
+            } catch (InstantiationException | IllegalAccessException | NoSuchMethodException | InvocationTargetException e) {
+                throw new Error(e);
+            }
+        });
+    }
+
+    public void validate() {
+        configs.values().forEach(Config::validate);
+    }
+
+    protected <T> Class<T> configClass(Class<T> configClass) {
+        return configClass;
     }
 }

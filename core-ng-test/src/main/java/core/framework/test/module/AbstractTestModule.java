@@ -1,6 +1,6 @@
 package core.framework.test.module;
 
-import core.framework.impl.module.ModuleContext;
+import core.framework.module.InitDBConfig;
 import core.framework.module.Module;
 import core.framework.test.inject.TestBeanFactory;
 import org.slf4j.Logger;
@@ -16,10 +16,10 @@ public abstract class AbstractTestModule extends Module {
 
     public final void configure(TestBeanFactory beanFactory) {
         logger.info("initialize test context");
-        context = new ModuleContext(beanFactory, new MockFactoryImpl());
+        context = new TestModuleContext(beanFactory);
         logger.info("initialize application");
         initialize();
-        context.config.validate();
+        context.validate();
         ((TestBeanFactory) context.beanFactory).validateOverrideBindings();
     }
 
@@ -36,10 +36,6 @@ public abstract class AbstractTestModule extends Module {
     }
 
     public InitDBConfig initDB(String name) {
-        return new InitDBConfig(context, name);
-    }
-
-    public InitSearchConfig initSearch() {
-        return new InitSearchConfig(context);
+        return context.config(InitDBConfig.class, name);
     }
 }

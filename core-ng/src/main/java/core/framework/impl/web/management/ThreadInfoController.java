@@ -1,5 +1,6 @@
 package core.framework.impl.web.management;
 
+import core.framework.impl.web.http.IPAccessControl;
 import core.framework.web.Request;
 import core.framework.web.Response;
 
@@ -13,8 +14,10 @@ import java.lang.management.ThreadMXBean;
  * @author neo
  */
 public class ThreadInfoController {
+    private final IPAccessControl accessControl = new IPAccessControl();
+
     public Response threadUsage(Request request) {
-        ControllerHelper.assertFromLocalNetwork(request.clientIP());
+        accessControl.validate(request.clientIP());
 
         ThreadUsage usage = new ThreadUsage();
         ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
@@ -25,7 +28,7 @@ public class ThreadInfoController {
     }
 
     public Response threadDump(Request request) {
-        ControllerHelper.assertFromLocalNetwork(request.clientIP());
+        accessControl.validate(request.clientIP());
 
         return Response.text(threadDumpText());
     }

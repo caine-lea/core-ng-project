@@ -3,7 +3,6 @@ package core.framework.impl.web;
 import core.framework.impl.log.LogManager;
 import core.framework.impl.web.site.SiteManager;
 import core.framework.util.StopWatch;
-import core.framework.util.Threads;
 import io.undertow.Undertow;
 import io.undertow.UndertowOptions;
 import io.undertow.server.HttpHandler;
@@ -46,16 +45,11 @@ public class HTTPServer {
             if (httpPort != null) builder.addHttpListener(httpPort, "0.0.0.0");
             if (httpsPort != null) builder.addHttpsListener(httpsPort, "0.0.0.0", new SSLContextBuilder().build());
 
-            int ioThreads = Math.max(Threads.availableProcessors(), 2); // same logic as io.undertow.Undertow.Builder(), but use overridden availableProcessors value
-            int workerThreads = ioThreads * 8;
-
             builder.setHandler(handler())
                    .setServerOption(UndertowOptions.DECODE_URL, false)
                    .setServerOption(UndertowOptions.ENABLE_HTTP2, true)
                    .setServerOption(UndertowOptions.ENABLE_RFC6265_COOKIE_VALIDATION, true)
-                   .setServerOption(UndertowOptions.MAX_ENTITY_SIZE, 10L * 1024 * 1024)  // max post body is 10M
-                   .setIoThreads(ioThreads)
-                   .setWorkerThreads(workerThreads);
+                   .setServerOption(UndertowOptions.MAX_ENTITY_SIZE, 10L * 1024 * 1024);  // max post body is 10M
 
             server = builder.build();
             server.start();

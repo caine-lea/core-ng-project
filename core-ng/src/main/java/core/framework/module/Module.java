@@ -1,5 +1,6 @@
 package core.framework.module;
 
+import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.util.Exceptions;
 import org.slf4j.Logger;
@@ -72,11 +73,11 @@ public abstract class Module {
     }
 
     public LogConfig log() {
-        return new LogConfig(context);
+        return context.config(LogConfig.class, null);
     }
 
     public HTTPConfig http() {
-        return new HTTPConfig(context);
+        return context.config(HTTPConfig.class, null);
     }
 
     public RouteConfig route() {
@@ -84,19 +85,23 @@ public abstract class Module {
     }
 
     public SiteConfig site() {
-        return new SiteConfig(context);
+        return context.config(SiteConfig.class, null);
     }
 
     public CacheConfig cache() {
-        return new CacheConfig(context);
+        return context.config(CacheConfig.class, null);
     }
 
     public SchedulerConfig schedule() {
-        return new SchedulerConfig(context);
+        return context.config(SchedulerConfig.class, null);
+    }
+
+    public ExecutorConfig executor() {
+        return context.config(ExecutorConfig.class, null);
     }
 
     public APIConfig api() {
-        return new APIConfig(context);
+        return context.config(APIConfig.class, null);
     }
 
     public DBConfig db() {
@@ -104,23 +109,11 @@ public abstract class Module {
     }
 
     public DBConfig db(String name) {
-        return new DBConfig(context, name);
+        return context.config(DBConfig.class, name);
     }
 
     public RedisConfig redis() {
-        return new RedisConfig(context);
-    }
-
-    public SearchConfig search() {
-        return new SearchConfig(context);
-    }
-
-    public MongoConfig mongo() {
-        return mongo(null);
-    }
-
-    public MongoConfig mongo(String name) {
-        return new MongoConfig(context, name);
+        return context.config(RedisConfig.class, null);
     }
 
     public KafkaConfig kafka() {
@@ -128,7 +121,15 @@ public abstract class Module {
     }
 
     public KafkaConfig kafka(String name) {
-        return new KafkaConfig(context, name);
+        return context.config(KafkaConfig.class, name);
+    }
+
+    public <T extends Config> T config(Class<T> configClass) {
+        return config(configClass, null);
+    }
+
+    public <T extends Config> T config(Class<T> configClass, String name) {
+        return context.config(configClass, name);
     }
 
     protected abstract void initialize();

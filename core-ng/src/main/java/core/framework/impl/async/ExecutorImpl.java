@@ -3,7 +3,6 @@ package core.framework.impl.async;
 import core.framework.async.Executor;
 import core.framework.impl.log.ActionLog;
 import core.framework.impl.log.LogManager;
-import core.framework.util.Threads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,15 +16,18 @@ import java.util.concurrent.TimeUnit;
  */
 public final class ExecutorImpl implements Executor {
     private final Logger logger = LoggerFactory.getLogger(ExecutorImpl.class);
-    private final ExecutorService executor = ThreadPools.cachedThreadPool(Threads.availableProcessors() * 2, "executor-");
+    private final ExecutorService executor;
     private final LogManager logManager;
+    private final String name;
 
-    public ExecutorImpl(LogManager logManager) {
+    public ExecutorImpl(ExecutorService executor, LogManager logManager, String name) {
+        this.executor = executor;
         this.logManager = logManager;
+        this.name = name;
     }
 
     public void stop() {
-        logger.info("stop executor");
+        logger.info("stop executor, name={}", name);
         executor.shutdown();
         try {
             executor.awaitTermination(10, TimeUnit.SECONDS);     // wait 10 seconds to finish current tasks
@@ -37,17 +39,15 @@ public final class ExecutorImpl implements Executor {
     @Override
     public <T> Future<T> submit(String action, Callable<T> task) {
         ActionLog parentActionLog = logManager.currentActionLog();
-        String taskAction = parentActionLog.action + ":" + action;
+        String taskAction = taskAction(action, parentActionLog.action);
         String refId = parentActionLog.refId();
         boolean trace = parentActionLog.trace;
         return executor.submit(() -> {
             try {
                 ActionLog actionLog = logManager.begin("=== task execution begin ===");
-                actionLog.refId(refId);
                 actionLog.action(taskAction);
-                if (trace) {
-                    actionLog.trace = true;
-                }
+                actionLog.refId(refId);
+                actionLog.trace = trace;
                 return task.call();
             } catch (Throwable e) {
                 logManager.logError(e);
@@ -56,5 +56,11 @@ public final class ExecutorImpl implements Executor {
                 logManager.end("=== task execution end ===");
             }
         });
+    }
+
+    String taskAction(String action, String parentAction) {
+        String postfix = ":" + action;
+        if (parentAction.endsWith(postfix)) return parentAction;
+        return parentAction + postfix;
     }
 }

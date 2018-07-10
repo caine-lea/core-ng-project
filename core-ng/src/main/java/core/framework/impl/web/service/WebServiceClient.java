@@ -11,14 +11,13 @@ import core.framework.impl.log.ActionLog;
 import core.framework.impl.log.LogManager;
 import core.framework.impl.web.HTTPServerHandler;
 import core.framework.impl.web.bean.RequestBeanMapper;
+import core.framework.impl.web.bean.ResponseBeanMapper;
 import core.framework.impl.web.route.Path;
 import core.framework.json.JSON;
 import core.framework.log.Severity;
 import core.framework.util.Encodings;
 import core.framework.util.Exceptions;
-import core.framework.util.Maps;
 import core.framework.util.Strings;
-import core.framework.validate.ValidationException;
 import core.framework.web.service.RemoteServiceException;
 import core.framework.web.service.WebServiceClientInterceptor;
 import org.slf4j.Logger;
@@ -31,18 +30,20 @@ import java.util.Map;
  * @author neo
  */
 public class WebServiceClient {
+    public static final String USER_AGENT = "APIClient";
     private final Logger logger = LoggerFactory.getLogger(WebServiceClient.class);
-
     private final String serviceURL;
     private final HTTPClient httpClient;
-    private final RequestBeanMapper mapper;
+    private final RequestBeanMapper requestBeanMapper;
+    private final ResponseBeanMapper responseBeanMapper;
     private final LogManager logManager;
     private WebServiceClientInterceptor interceptor;
 
-    public WebServiceClient(String serviceURL, HTTPClient httpClient, RequestBeanMapper mapper, LogManager logManager) {
+    public WebServiceClient(String serviceURL, HTTPClient httpClient, RequestBeanMapper requestBeanMapper, ResponseBeanMapper responseBeanMapper, LogManager logManager) {
         this.serviceURL = serviceURL;
         this.httpClient = httpClient;
-        this.mapper = mapper;
+        this.requestBeanMapper = requestBeanMapper;
+        this.responseBeanMapper = responseBeanMapper;
         this.logManager = logManager;
     }
 
@@ -70,12 +71,11 @@ public class WebServiceClient {
 
     private String pathParam(Map<String, Object> pathParams, String variable) {
         Object param = pathParams.get(variable);
-        if (param == null) throw new ValidationException(Maps.newHashMap(variable, Strings.format("path param must not be null, name={}", variable)));
+        if (param == null) throw Exceptions.error("path param must not be null, name={}", variable);
         // convert logic matches PathParams
         if (param instanceof String) {
             String paramValue = (String) param;
-            if (Strings.isEmpty(paramValue))
-                throw new ValidationException(Maps.newHashMap(variable, Strings.format("path param must not be empty, name={}", variable)));
+            if (Strings.isEmpty(paramValue)) throw Exceptions.error("path param must not be empty, name={}", variable);
             return paramValue;
         } else if (param instanceof Number) {
             return String.valueOf(param);
@@ -87,13 +87,13 @@ public class WebServiceClient {
     }
 
     // used by generated code, must be public
-    public Object execute(HTTPMethod method, String serviceURL, Type requestType, Object requestBean, Type responseType) {
+    public <T> Object execute(HTTPMethod method, String serviceURL, Class<T> requestBeanClass, T requestBean, Type responseType) {
         HTTPRequest request = new HTTPRequest(method, serviceURL);
         request.accept(ContentType.APPLICATION_JSON);
         linkContext(request);
 
-        if (requestType != null) {
-            addRequestBean(request, method, requestType, requestBean);
+        if (requestBeanClass != null) {
+            addRequestBean(request, method, requestBeanClass, requestBean);
         }
 
         if (interceptor != null) {
@@ -103,19 +103,20 @@ public class WebServiceClient {
 
         HTTPResponse response = httpClient.execute(request);
         validateResponse(response);
-        if (void.class != responseType) {
-            return JSONMapper.fromJSON(responseType, response.body());
-        } else {
-            return null;
-        }
+        return parseResponse(responseType, response);
     }
 
-    void addRequestBean(HTTPRequest request, HTTPMethod method, Type requestType, Object requestBean) {
+    Object parseResponse(Type responseType, HTTPResponse response) {
+        if (void.class == responseType) return null;
+        return responseBeanMapper.fromJSON(responseType, response.body());
+    }
+
+    <T> void addRequestBean(HTTPRequest request, HTTPMethod method, Class<T> requestBeanClass, T requestBean) {
         if (method == HTTPMethod.GET || method == HTTPMethod.DELETE) {
-            Map<String, String> queryParams = mapper.toParams(requestType, requestBean);
+            Map<String, String> queryParams = requestBeanMapper.toParams(requestBeanClass, requestBean);
             addQueryParams(request, queryParams);
         } else if (method == HTTPMethod.POST || method == HTTPMethod.PUT || method == HTTPMethod.PATCH) {
-            byte[] json = mapper.toJSON(requestType, requestBean);
+            byte[] json = requestBeanMapper.toJSON(requestBeanClass, requestBean);
             request.body(json, ContentType.APPLICATION_JSON);
         } else {
             throw Exceptions.error("not supported method, method={}", method);
@@ -151,13 +152,13 @@ public class WebServiceClient {
         try {
             ErrorResponse error = JSONMapper.fromJSON(ErrorResponse.class, responseBody);
             logger.debug("failed to call remote service, id={}, severity={}, errorCode={}, remoteStackTrace={}", error.id, error.severity, error.errorCode, error.stackTrace);
-            throw new RemoteServiceException(error.message, parseSeverity(error.severity), error.errorCode);
+            throw new RemoteServiceException(error.message, parseSeverity(error.severity), error.errorCode, status);
         } catch (RemoteServiceException e) {
             throw e;
         } catch (Throwable e) {
             String responseText = response.text();
             logger.warn("failed to decode response, statusCode={}, responseText={}", status.code, responseText, e);
-            throw new RemoteServiceException(Strings.format("internal communication failed, status={}, responseText={}", status.code, responseText), Severity.ERROR, "REMOTE_SERVICE_ERROR", e);
+            throw new RemoteServiceException(Strings.format("internal communication failed, status={}, responseText={}", status.code, responseText), Severity.ERROR, "REMOTE_SERVICE_ERROR", status, e);
         }
     }
 

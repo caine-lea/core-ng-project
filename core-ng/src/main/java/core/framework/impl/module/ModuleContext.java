@@ -1,15 +1,15 @@
 package core.framework.impl.module;
 
+import core.framework.async.Task;
 import core.framework.http.HTTPMethod;
 import core.framework.impl.inject.BeanFactory;
-import core.framework.impl.inject.ShutdownHook;
 import core.framework.impl.log.DefaultLoggerFactory;
 import core.framework.impl.log.LogManager;
 import core.framework.impl.log.stat.Stat;
-import core.framework.impl.web.ControllerClassValidator;
-import core.framework.impl.web.ControllerHolder;
-import core.framework.impl.web.ControllerInspector;
 import core.framework.impl.web.HTTPServer;
+import core.framework.impl.web.controller.ControllerClassValidator;
+import core.framework.impl.web.controller.ControllerHolder;
+import core.framework.impl.web.controller.ControllerInspector;
 import core.framework.impl.web.management.MemoryUsageController;
 import core.framework.impl.web.management.PropertyController;
 import core.framework.impl.web.management.ThreadInfoController;
@@ -23,6 +23,7 @@ import core.framework.web.site.WebDirectory;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Type;
 import java.util.List;
 import java.util.Map;
 
@@ -30,8 +31,8 @@ import java.util.Map;
  * @author neo
  */
 public class ModuleContext {
-    public final BeanFactory beanFactory;
-    public final List<Runnable> startupHook = Lists.newArrayList();
+    public final BeanFactory beanFactory = new BeanFactory();
+    public final List<Task> startupHook = Lists.newArrayList();
     public final ShutdownHook shutdownHook = new ShutdownHook();
     public final PropertyManager propertyManager = new PropertyManager();
     public final HTTPServer httpServer;
@@ -40,22 +41,21 @@ public class ModuleContext {
     protected final Map<String, Config> configs = Maps.newHashMap();
     private BackgroundTaskExecutor backgroundTask;
 
-    public ModuleContext(BeanFactory beanFactory) {
-        this.beanFactory = beanFactory;
-
+    public ModuleContext() {
         logManager = ((DefaultLoggerFactory) LoggerFactory.getILoggerFactory()).logManager;
 
         httpServer = new HTTPServer(logManager);
         beanFactory.bind(WebContext.class, null, httpServer.handler.webContext);
         beanFactory.bind(WebDirectory.class, null, httpServer.siteManager.webDirectory);
         startupHook.add(httpServer::start);
-        shutdownHook.add(httpServer::stop);
+        shutdownHook.add(ShutdownHook.STAGE_0, timeout -> httpServer.shutdown());
+        shutdownHook.add(ShutdownHook.STAGE_1, httpServer::awaitTermination);
 
         route(HTTPMethod.GET, "/_sys/memory", new MemoryUsageController(), true);
-        ThreadInfoController threadInfoController = new ThreadInfoController();
+        var threadInfoController = new ThreadInfoController();
         route(HTTPMethod.GET, "/_sys/thread", threadInfoController::threadUsage, true);
         route(HTTPMethod.GET, "/_sys/thread-dump", threadInfoController::threadDump, true);
-        PropertyController propertyController = new PropertyController(propertyManager);
+        var propertyController = new PropertyController(propertyManager);
         route(HTTPMethod.GET, "/_sys/property", propertyController, true);
     }
 
@@ -63,14 +63,15 @@ public class ModuleContext {
         if (backgroundTask == null) {
             backgroundTask = new BackgroundTaskExecutor();
             startupHook.add(backgroundTask::start);
-            shutdownHook.add(backgroundTask::stop);
+            shutdownHook.add(ShutdownHook.STAGE_0, timeout -> backgroundTask.shutdown());
+            shutdownHook.add(ShutdownHook.STAGE_2, backgroundTask::awaitTermination);
         }
         return backgroundTask;
     }
 
     public void route(HTTPMethod method, String path, Controller controller, boolean skipInterceptor) {
         new PathPatternValidator(path).validate();
-        ControllerInspector inspector = new ControllerInspector(controller);
+        var inspector = new ControllerInspector(controller);
         new ControllerClassValidator(inspector.targetClass, inspector.targetMethod).validate();
         String action = "http:" + ASCII.toLowerCase(method.name()) + ":" + path;
         httpServer.handler.route.add(method, path, new ControllerHolder(controller, inspector.targetMethod, inspector.controllerInfo, action, skipInterceptor));
@@ -87,6 +88,10 @@ public class ModuleContext {
                 throw new Error(e);
             }
         });
+    }
+
+    public void bind(Type type, String name, Object instance) {
+        beanFactory.bind(type, name, instance);
     }
 
     public void validate() {

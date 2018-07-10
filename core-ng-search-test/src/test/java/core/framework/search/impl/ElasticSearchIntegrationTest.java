@@ -24,9 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author neo
@@ -45,21 +43,18 @@ class ElasticSearchIntegrationTest extends IntegrationTest {
 
     @Test
     void index() {
-        TestDocument document = createDocument("2", "value2", 2);
+        TestDocument document = document("2", "value2", 2);
 
         Optional<TestDocument> returnedDocument = documentType.get(document.id);
-        assertTrue(returnedDocument.isPresent());
-        assertEquals(document.stringField, returnedDocument.get().stringField);
-        assertEquals(document.zonedDateTimeField.toInstant(), returnedDocument.get().zonedDateTimeField.toInstant());
+        assertThat(returnedDocument).get().isEqualToIgnoringGivenFields(document, "zonedDateTimeField");
+        assertThat(returnedDocument.orElseThrow().zonedDateTimeField).isEqualTo(document.zonedDateTimeField);
     }
 
     @Test
     void forEach() {
         Map<String, TestDocument> documents = Maps.newHashMap();
         for (int i = 0; i < 30; i++) {
-            TestDocument document = new TestDocument();
-            document.id = String.valueOf(i);
-            document.stringField = String.valueOf(i);
+            TestDocument document = document(String.valueOf(i), String.valueOf(i), i);
             documents.put(document.id, document);
         }
         documentType.bulkIndex(documents);
@@ -74,64 +69,89 @@ class ElasticSearchIntegrationTest extends IntegrationTest {
 
         documentType.forEach(forEach);
 
-        assertEquals(30, results.size());
+        assertThat(results).hasSize(30);
+    }
+
+    @Test
+    void complete() {
+        Map<String, TestDocument> documents = Maps.newHashMap();
+        documents.put("1", document("1", "HashSet", 1));
+        documents.put("2", document("2", "HashMap", 2));
+        documents.put("3", document("3", "TreeSet", 3));
+        documents.put("4", document("4", "TreeMap", 4));
+        documentType.bulkIndex(documents);
+        elasticSearch.flush("document");
+
+        List<String> options = documentType.complete("hash", "completion1", "completion2");
+        assertThat(options).contains("HashSet-Complete1", "HashSet-Complete2", "HashMap-Complete1", "HashMap-Complete2");
     }
 
     @Test
     void search() {
-        TestDocument document = createDocument("1", "value1", 1);
+        TestDocument document = document("1", "1st Test's Product", 1);
         elasticSearch.flush("document");
 
+        // test synonyms
         SearchRequest request = new SearchRequest();
-        request.query = QueryBuilders.matchQuery("string_field", document.stringField);
+        request.query = QueryBuilders.matchQuery("string_field", "first");
         request.sorts.add(SortBuilders.scriptSort(new Script("doc['num_field'].value * 3"), ScriptSortBuilder.ScriptSortType.NUMBER));
         SearchResponse<TestDocument> response = documentType.search(request);
 
-        assertEquals(1, response.totalHits);
-        TestDocument returnedDocument = response.hits.get(0);
-        assertEquals(document.stringField, returnedDocument.stringField);
+        assertThat(response.totalHits).isEqualTo(1);
+        assertThat(response.hits.get(0)).isEqualToIgnoringGivenFields(document, "zonedDateTimeField");
+
+        // test stemmer
+        request = new SearchRequest();
+        request.query = QueryBuilders.matchQuery("string_field", "test");
+        response = documentType.search(request);
+
+        assertThat(response.totalHits).isEqualTo(1);
+        assertThat(response.hits.get(0)).isEqualToIgnoringGivenFields(document, "zonedDateTimeField");
     }
 
     @Test
     void delete() {
-        TestDocument document = createDocument("1", "value", 1);
+        TestDocument document = document("1", "value", 1);
 
         boolean result = documentType.delete(document.id);
-        assertTrue(result);
+        assertThat(result).isTrue();
     }
 
     @Test
     void bulkDelete() {
-        createDocument("1", "value1", 1);
-        createDocument("2", "value2", 2);
+        document("1", "value1", 1);
+        document("2", "value2", 2);
 
-        documentType.bulkDelete(Lists.newArrayList("1", "2"));
-        assertFalse(documentType.get("1").isPresent());
-        assertFalse(documentType.get("2").isPresent());
+        documentType.bulkDelete(List.of("1", "2"));
+        assertThat(documentType.get("1")).isNotPresent();
+        assertThat(documentType.get("2")).isNotPresent();
     }
 
     @Test
     void analyze() {
         List<String> tokens = documentType.analyze("standard", "word1 word2");
-        assertEquals(Lists.newArrayList("word1", "word2"), tokens);
+        assertThat(tokens).contains("word1", "word2");
     }
 
     @Test
     void indices() {
         List<ElasticSearchIndex> indices = elasticSearch.indices();
 
-        assertEquals(1, indices.size());
+        assertThat(indices).hasSize(1);
+
         ElasticSearchIndex index = indices.get(0);
-        assertEquals("document", index.index);
-        assertEquals(IndexMetaData.State.OPEN, index.state);
+        assertThat(index.index).isEqualTo("document");
+        assertThat(index.state).isEqualTo(IndexMetaData.State.OPEN);
     }
 
-    private TestDocument createDocument(String id, String stringField, int numField) {
+    private TestDocument document(String id, String stringField, int numField) {
         TestDocument document = new TestDocument();
         document.id = id;
         document.stringField = stringField;
         document.numField = numField;
         document.zonedDateTimeField = ZonedDateTime.now(ZoneId.of("America/New_York"));
+        document.completion1 = stringField + "-Complete1";
+        document.completion2 = stringField + "-Complete2";
         documentType.index(document.id, document);
         return document;
     }

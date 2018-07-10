@@ -1,7 +1,9 @@
 package core.framework.module;
 
+import core.framework.async.Task;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
+import core.framework.impl.module.ShutdownHook;
 import core.framework.util.Exceptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,17 +25,17 @@ public abstract class Module {
         module.initialize();
     }
 
-    public void onShutdown(Runnable runnable) {
-        context.shutdownHook.add(runnable);
+    public void onShutdown(Task task) {
+        context.shutdownHook.add(ShutdownHook.STAGE_10, timeout -> task.execute());
     }
 
-    public void onStartup(Runnable runnable) {
-        context.startupHook.add(runnable);
+    public void onStartup(Task task) {
+        context.startupHook.add(task);
     }
 
     public <T> T bind(Class<T> instanceClass) {
         T instance = context.beanFactory.create(instanceClass);
-        context.beanFactory.bind(instanceClass, null, instance);
+        context.bind(instanceClass, null, instance);
         return instance;
     }
 
@@ -47,7 +49,7 @@ public abstract class Module {
 
     public <T> T bind(Type type, String name, T instance) {
         context.beanFactory.inject(instance);
-        context.beanFactory.bind(type, name, instance);
+        context.bind(type, name, instance);
         return instance;
     }
 

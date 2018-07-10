@@ -18,20 +18,20 @@ import org.slf4j.LoggerFactory;
  */
 public class HTTPServer {
     static {
-        // make undertow to use slf4j
-        System.setProperty("org.jboss.logging.provider", "slf4j");
+        System.setProperty("org.jboss.logging.provider", "slf4j");  // make undertow to use slf4j
     }
 
     public final SiteManager siteManager = new SiteManager();
     public final HTTPServerHandler handler;
     private final Logger logger = LoggerFactory.getLogger(HTTPServer.class);
+    private final ShutdownHandler shutdownHandler = new ShutdownHandler();
     public Integer httpPort;
     public Integer httpsPort;
     public boolean gzip;
     private Undertow server;
 
     public HTTPServer(LogManager logManager) {
-        handler = new HTTPServerHandler(logManager, siteManager);
+        handler = new HTTPServerHandler(logManager, siteManager.sessionManager, siteManager.templateManager, shutdownHandler);
     }
 
     public void start() {
@@ -59,21 +59,35 @@ public class HTTPServer {
     }
 
     private HttpHandler handler() {
-        HTTPServerIOHandler handler = new HTTPServerIOHandler(this.handler);
-
-        if (!gzip) return handler;
-
-        GZipPredicate predicate = new GZipPredicate();
-        return new EncodingHandler(new ContentEncodingRepository()
-                .addEncodingHandler("gzip", new GzipEncodingProvider(), 100, predicate)
-                .addEncodingHandler("deflate", new DeflateEncodingProvider(), 10, predicate))
-                .setNext(handler);
+        HttpHandler handler = new HTTPServerIOHandler(this.handler);
+        if (gzip) {
+            var predicate = new GZipPredicate();
+            handler = new EncodingHandler(handler, new ContentEncodingRepository()
+                    .addEncodingHandler("gzip", new GzipEncodingProvider(), 100, predicate)
+                    .addEncodingHandler("deflate", new DeflateEncodingProvider(), 10, predicate));
+        }
+        return handler;
     }
 
-    public void stop() {
+    public void shutdown() {
         if (server != null) {
-            logger.info("stop http server");
-            server.stop();
+            logger.info("shutting down http server");
+            shutdownHandler.shutdown();
+        }
+    }
+
+    public void awaitTermination(long timeoutInMs) throws InterruptedException {
+        if (server != null) {
+            try {
+                boolean success = shutdownHandler.awaitTermination(timeoutInMs);
+                if (!success) {
+                    logger.warn("failed to wait all http requests to complete");
+                    server.getWorker().shutdownNow();
+                }
+            } finally {
+                server.stop();
+                logger.info("http server stopped");
+            }
         }
     }
 }

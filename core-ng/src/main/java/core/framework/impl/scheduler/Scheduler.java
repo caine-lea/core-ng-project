@@ -43,7 +43,7 @@ public final class Scheduler {
     }
 
     public void start() {
-        ZonedDateTime now = ZonedDateTime.now(clock);
+        var now = ZonedDateTime.now(clock);
         tasks.forEach((name, task) -> {
             if (task instanceof FixedRateTask) {
                 schedule((FixedRateTask) task);
@@ -61,15 +61,21 @@ public final class Scheduler {
         logger.info("scheduler started");
     }
 
-    public void stop() {
-        logger.info("stop scheduler");
+    public void shutdown() throws InterruptedException {
+        logger.info("shutting down scheduler");
         scheduler.shutdown();
-        jobExecutor.shutdown();
         try {
-            jobExecutor.awaitTermination(10, TimeUnit.SECONDS);     // wait 10 seconds to finish current tasks
-        } catch (InterruptedException e) {
-            logger.warn("failed to wait all tasks to finish", e);
+            boolean success = scheduler.awaitTermination(5000, TimeUnit.MILLISECONDS);
+            if (!success) logger.warn("failed to terminate scheduler");
+        } finally {
+            jobExecutor.shutdown();
         }
+    }
+
+    public void awaitTermination(long timeoutInMs) throws InterruptedException {
+        boolean success = jobExecutor.awaitTermination(timeoutInMs, TimeUnit.MILLISECONDS);
+        if (!success) logger.warn("failed to terminate scheduler job executor");
+        else logger.info("scheduler stopped");
     }
 
     public void addFixedRateTask(String name, Job job, Duration rate) {
@@ -104,7 +110,7 @@ public final class Scheduler {
     }
 
     void schedule(FixedRateTask task) {
-        Duration delay = Duration.ofMillis((long) Randoms.number(1000, 3000)); // delay 1s to 3s
+        Duration delay = Duration.ofMillis((long) Randoms.nextDouble(1000, 3000)); // delay 1s to 3s
         scheduler.scheduleAtFixedRate(() -> {
             logger.info("execute scheduled job, job={}", task.name());
             submitJob(task, false);

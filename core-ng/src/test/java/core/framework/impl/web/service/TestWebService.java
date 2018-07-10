@@ -45,18 +45,14 @@ public interface TestWebService {
     @Path("/test/:id")
     void delete(@PathParam("id") String id);
 
-    @PUT
-    @Path("/test")
-    List<TestResponse> batch(List<TestRequest> requests);
-
     @PATCH
     @Path("/test/:id")
     void patch(@PathParam("id") Integer id, TestRequest request);
 
     enum TestEnum {
-        @Property(name = "A")
+        @Property(name = "A1")
         A,
-        @Property(name = "B")
+        @Property(name = "B1")
         B
     }
 
@@ -101,6 +97,7 @@ public interface TestWebService {
     }
 
     class TestResponse {
+        @NotNull
         @Property(name = "int_field")
         public Integer intField;
 

@@ -13,15 +13,18 @@ import core.framework.impl.reflect.Methods;
 import core.framework.impl.reflect.Params;
 import core.framework.impl.validate.type.JSONTypeValidator;
 import core.framework.impl.web.bean.RequestBeanMapper;
-import core.framework.impl.web.bean.ResponseBeanTypeValidator;
+import core.framework.impl.web.bean.ResponseBeanMapper;
 import core.framework.impl.web.route.PathPatternValidator;
 import core.framework.util.Exceptions;
+import core.framework.util.Maps;
 import core.framework.util.Sets;
 import core.framework.util.Strings;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -30,19 +33,24 @@ import java.util.Set;
 public class WebServiceInterfaceValidator {
     private final Class<?> serviceInterface;
     private final RequestBeanMapper requestBeanMapper;
-    private final ResponseBeanTypeValidator responseBeanTypeValidator;
+    private final ResponseBeanMapper responseBeanMapper;
 
-    public WebServiceInterfaceValidator(Class<?> serviceInterface, RequestBeanMapper requestBeanMapper, ResponseBeanTypeValidator responseBeanTypeValidator) {
+    public WebServiceInterfaceValidator(Class<?> serviceInterface, RequestBeanMapper requestBeanMapper, ResponseBeanMapper responseBeanMapper) {
         this.serviceInterface = serviceInterface;
         this.requestBeanMapper = requestBeanMapper;
-        this.responseBeanTypeValidator = responseBeanTypeValidator;
+        this.responseBeanMapper = responseBeanMapper;
     }
 
     public void validate() {
         if (!serviceInterface.isInterface())
             throw Exceptions.error("service interface must be interface, serviceInterface={}", serviceInterface.getCanonicalName());
 
+        Map<String, Method> methodNames = Maps.newHashMap();
         for (Method method : serviceInterface.getDeclaredMethods()) {
+            Method previous = methodNames.put(method.getName(), method);
+            if (previous != null) {
+                throw Exceptions.error("found duplicate method name which can be confusing, please use different method name, method={}, previous={}", Methods.path(method), Methods.path(previous));
+            }
             validate(method);
         }
     }
@@ -56,10 +64,10 @@ public class WebServiceInterfaceValidator {
         if (path == null) throw Exceptions.error("service method must have @Path, method={}", Methods.path(method));
         new PathPatternValidator(path.value()).validate();
 
-        validateResponseBeanType(method.getGenericReturnType());
+        validateResponseBeanType(method.getGenericReturnType(), method);
 
         Set<String> pathVariables = pathVariables(path.value(), method);
-        Type requestBeanType = null;
+        Class<?> requestBeanClass = null;
 
         Annotation[][] annotations = method.getParameterAnnotations();
         Type[] paramTypes = method.getGenericParameterTypes();
@@ -72,16 +80,16 @@ public class WebServiceInterfaceValidator {
                 validatePathParamType(paramType, method);
                 pathParams.add(pathParam.value());
             } else {
-                if (requestBeanType != null)
-                    throw Exceptions.error("service method must not have more than one bean param, previous={}, current={}, method={}", requestBeanType.getTypeName(), paramType.getTypeName(), Methods.path(method));
-                requestBeanType = paramType;
+                if (requestBeanClass != null)
+                    throw Exceptions.error("service method must not have more than one bean param, previous={}, current={}, method={}", requestBeanClass.getTypeName(), paramType.getTypeName(), Methods.path(method));
+                requestBeanClass = GenericTypes.rawClass(paramType);
 
-                validateRequestBeanType(requestBeanType, method);
+                validateRequestBeanClass(requestBeanClass, method);
 
                 if (httpMethod == HTTPMethod.GET || httpMethod == HTTPMethod.DELETE) {
-                    requestBeanMapper.registerQueryParamBean(requestBeanType);
+                    requestBeanMapper.registerQueryParamBean(requestBeanClass);
                 } else {
-                    requestBeanMapper.registerRequestBean(requestBeanType);
+                    requestBeanMapper.registerRequestBean(requestBeanClass);
                 }
             }
         }
@@ -90,15 +98,10 @@ public class WebServiceInterfaceValidator {
             throw Exceptions.error("service method @PathParam params must match variable in path pattern, path={}, method={}", path.value(), Methods.path(method));
     }
 
-    void validateRequestBeanType(Type beanType, Method method) {    // due to it's common to forget @PathParam in service method param, this is to make error message more friendly
-        Class<?> beanClass = GenericTypes.rawClass(beanType);
-
-        if (Integer.class.equals(beanClass)
-                || Long.class.equals(beanClass)
-                || String.class.equals(beanClass)
-                || beanClass.isEnum()) {
-            throw Exceptions.error("request bean must not be value type, if it is path param, please add @PathParam, beanClass={}, method={}", beanClass.getCanonicalName(), Methods.path(method));
-        }
+    void validateRequestBeanClass(Class<?> beanClass, Method method) {    // due to it's common to forget @PathParam in service method param, this is to make error message more friendly
+        boolean isValueType = isValueType(beanClass);
+        if (isValueType)
+            throw Exceptions.error("request bean type must be bean class, if it is path param, please add @PathParam, type={}, method={}", beanClass.getCanonicalName(), Methods.path(method));
     }
 
     private Set<String> pathVariables(String path, Method method) {
@@ -117,7 +120,7 @@ public class WebServiceInterfaceValidator {
 
     private void validatePathParamType(Type paramType, Method method) {
         if (!(paramType instanceof Class))
-            throw Exceptions.error("path param must be class, type={}, method={}", paramType.getTypeName(), Methods.path(method));
+            throw Exceptions.error("path param must be class type, type={}, method={}", paramType.getTypeName(), Methods.path(method));
 
         Class<?> paramClass = (Class<?>) paramType;
 
@@ -128,15 +131,22 @@ public class WebServiceInterfaceValidator {
         if (Long.class.equals(paramClass)) return;
         if (String.class.equals(paramClass)) return;
         if (paramClass.isEnum()) {
-            JSONTypeValidator.validateEnumClass(paramClass);
+            JSONTypeValidator.validateEnum(paramClass);
             return;
         }
-        throw Exceptions.error("path param class is not supported, paramClass={}, method={}", paramClass, Methods.path(method));
+        throw Exceptions.error("path param class is not supported, paramClass={}, method={}", paramClass.getCanonicalName(), Methods.path(method));
     }
 
-    private void validateResponseBeanType(Type responseBeanType) {
-        if (void.class == responseBeanType) return;
-        responseBeanTypeValidator.validate(responseBeanType);
+    void validateResponseBeanType(Type beanType, Method method) {
+        if (void.class == beanType) return;
+
+        // due to it's common to return wrong type as response, this is to make error message more friendly
+        boolean isGenericButNotOptional = beanType instanceof ParameterizedType && !GenericTypes.isGenericOptional(beanType);
+        boolean isValueType = beanType instanceof Class && isValueType((Class<?>) beanType);
+        if (isGenericButNotOptional || isValueType)
+            throw Exceptions.error("response bean type must be bean class or Optional<T>, type={}, method={}", beanType.getTypeName(), Methods.path(method));
+
+        responseBeanMapper.register(beanType);
     }
 
     private void validateHTTPMethod(Method method) {
@@ -148,5 +158,9 @@ public class WebServiceInterfaceValidator {
         if (method.isAnnotationPresent(PATCH.class)) count++;
         if (count != 1)
             throw Exceptions.error("method must have exact one http method annotation, method={}", Methods.path(method));
+    }
+
+    private boolean isValueType(Class<?> type) {
+        return type.isPrimitive() || type.getPackageName().startsWith("java") || type.isEnum();
     }
 }

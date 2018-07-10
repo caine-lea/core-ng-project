@@ -1,57 +1,25 @@
 package core.framework.impl.web.response;
 
-import core.framework.impl.web.bean.ResponseBeanTypeValidator;
+import core.framework.impl.validate.ValidationException;
+import core.framework.impl.web.bean.BeanClassNameValidator;
+import core.framework.impl.web.bean.ResponseBeanMapper;
 import core.framework.impl.web.bean.TestBean;
-import core.framework.util.Lists;
-import org.junit.jupiter.api.BeforeEach;
+import io.undertow.io.Sender;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-import java.util.Optional;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 /**
  * @author neo
  */
 class BeanBodyTest {
-    private ResponseBeanTypeValidator validator;
-
-    @BeforeEach
-    void createResponseBeanTypeValidator() {
-        validator = new ResponseBeanTypeValidator();
-    }
-
     @Test
-    void validateList() {
-        List<TestBean> list = Lists.newArrayList(new TestBean());
-        BeanBody body = new BeanBody(list);
-        body.validateBeanType(validator);
-    }
-
-    @Test
-    void validateEmptyList() {
-        List<TestBean> list = Lists.newArrayList();
-        BeanBody body = new BeanBody(list);
-        body.validateBeanType(validator);
-    }
-
-    @Test
-    void validateEmptyOptional() {
-        Optional<TestBean> optional = Optional.empty();
-        BeanBody body = new BeanBody(optional);
-        body.validateBeanType(validator);
-    }
-
-    @Test
-    void validateBean() {
-        TestBean bean = new TestBean();
-        BeanBody body = new BeanBody(bean);
-        body.validateBeanType(validator);
-    }
-
-    @Test
-    void validateOptionalBean() {
-        Optional<TestBean> optional = Optional.of(new TestBean());
-        BeanBody body = new BeanBody(optional);
-        body.validateBeanType(validator);
+    void send() {
+        Sender sender = mock(Sender.class);
+        ResponseHandlerContext context = new ResponseHandlerContext(new ResponseBeanMapper(new BeanClassNameValidator()), null);
+        BeanBody body = new BeanBody(new TestBean());
+        assertThatThrownBy(() -> body.send(sender, context))
+                .isInstanceOf(ValidationException.class);
     }
 }

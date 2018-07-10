@@ -28,7 +28,12 @@ public class TestModule extends AbstractTestModule {
         loadProperties("test.properties");
 
         overrideBinding(HTTPClient.class, Mockito.mock(HTTPClient.class));  // in test context, override binding is defined before actual binding
-        bind(HTTPClient.class, new HTTPClientBuilder().build());
+        bind(HTTPClient.class, new HTTPClientBuilder()
+                .keepAliveTimeout(Duration.ofSeconds(5))
+                .maxConnections(10)
+                .enableCookie()
+                .enableRedirect()
+                .build());
 
         configureDB();
         configureKafka();
@@ -55,7 +60,7 @@ public class TestModule extends AbstractTestModule {
     private void configureSite() {
         site().session().redis("localhost");
         site().cdn().host("//cdn");
-        site().webSecurity();
+        site().security().contentSecurityPolicy("default-src 'self' https://cdn; img-src 'self' https://cdn data:; object-src 'none'; frame-src 'none';");
         site().publishAPI("0.0.0.0/0");
     }
 
@@ -79,6 +84,11 @@ public class TestModule extends AbstractTestModule {
     private void configureDB() {
         db().url("jdbc:mysql://localhost:3306/test");
         db().defaultIsolationLevel(IsolationLevel.READ_UNCOMMITTED);
+        db().timeout(Duration.ofSeconds(10));
+        db().batchSize(7);
+        db().slowOperationThreshold(Duration.ofSeconds(5));
+        db().longTransactionThreshold(Duration.ofSeconds(5));
+        db().tooManyRowsReturnedThreshold(1000);
         db().repository(TestDBEntity.class);
         initDB().createSchema();
 

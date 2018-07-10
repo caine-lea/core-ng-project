@@ -8,6 +8,7 @@ import core.framework.impl.db.DatabaseImpl;
 import core.framework.impl.db.Vendor;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
+import core.framework.impl.module.ShutdownHook;
 import core.framework.impl.resource.PoolMetrics;
 import core.framework.util.Exceptions;
 import core.framework.util.Lists;
@@ -43,7 +44,7 @@ public class DBConfig extends Config {
 
     private DatabaseImpl createDatabase() {
         DatabaseImpl database = new DatabaseImpl("db" + (name == null ? "" : "-" + name));
-        context.shutdownHook.add(database::close);
+        context.shutdownHook.add(ShutdownHook.STAGE_10, timeout -> database.close());
         context.backgroundTask().scheduleWithFixedDelay(database.pool::refresh, Duration.ofMinutes(10));
         context.stat.metrics.add(new PoolMetrics(database.pool));
         context.beanFactory.bind(Database.class, name, database);
@@ -93,7 +94,7 @@ public class DBConfig extends Config {
     }
 
     public void slowOperationThreshold(Duration threshold) {
-        database.slowOperationThreshold(threshold);
+        database.slowOperationThresholdInNanos = threshold.toNanos();
     }
 
     public void tooManyRowsReturnedThreshold(int threshold) {
@@ -106,6 +107,10 @@ public class DBConfig extends Config {
 
     public void timeout(Duration timeout) {
         database.timeout(timeout);
+    }
+
+    public void batchSize(int size) {
+        database.operation.batchSize = size;
     }
 
     public void view(Class<?> viewClass) {

@@ -1,10 +1,66 @@
 ## Change log
-### 6.3.2 (5/22/2018 - )
+### 6.5.1 (7/7/2018 - )
+* template: support data url in html template
+
+### 6.5.0 (7/3/2018 - 7/4/2018)
+due to removed support List<T> as request/response type
+* web: request.bean must pass class type 
+* validation: remove support to validate top level List<T> 
+* validation: converted core.framework.impl.validate.ValidationException as internal exception, to treat as internal error, in application level, use BadRequestException instead
+* webservice: validate response bean on both controller and webserviceClient 
+* json: removed Optional<T> support and jackson dependency, as only use case of Optional<T> is responseType
+* test: renamed methods in core.framework.test.Assertions, to avoid conflicting with assertj 
+
+### 6.4.2 (6/28/2018 - 7/3/2018)
+* site: !!! updated csp design, allow to specify entire csp to keep maximum flexibility, this is due to difficulty of external sdk integration, e.g. facebook, ga  
+        use site().security().csp(csp) or sys.webSecurity.csp to configure, site().security() will enable rest headers without csp          
+* sys: validate keys in sys.properties
+* api: removed support List<T> as request/response due to security concerns
+
+### 6.4.1 (6/26/2018 - 6/27/2018)
+* api: added api().httpClient() to configure http client for api client, and potentially support local experiment code to call website/interface directly 
+* api: retry on NoHttpResponseException with non-idempotent methods, trade off for availability/complexity, best result we can get with keep-alive + graceful shutdown + retry   
+
+### 6.4.0 (6/24/2018 - 6/25/2018)
+* session: !!! redis session key changed from "sessionId:{id}" to "sessionId:{sha256(id)}" for security reason, so the redis log won't show clear text session id value, 
+        update lib will lose all existing user session, please deploy on scheduled time
+* httpClient: added retry support, refer to core.framework.impl.http.RetryHandler for details
+        make API client to retry (in kube env, persistent connection can be stale during deployment)
+
+### 6.3.7 (6/21/2018 - 6/24/2018)
+* api: make RemoteServiceException exposes https status
+* site: make default error handler fits most of cases to reduce the need of creating custom error handler 
+* make http server / scheduler / kafka listener / executor shutdown gracefully 
+* httpClient: added DefaultServiceUnavailableRetryStrategy, enable evictIdleConnections 
+
+### 6.3.6 (6/14/2018 - 6/21/2018)
+* api: assert same service interface must not have duplicate method name
+* search: update to 6.3.0, add analysis-common plugin for stemmer support during test
+
+### 6.3.5 (6/13/2018 - 6/14/208)
+* executor: support to submit void task as syntax sugar
+* api: tweak enum generation to use JAVA_ENUM_NAME: "PROPERTY_VALUE" pattern
+
+### 6.3.4 (6/4/2018 - 6/13/2018)
+* db: added db().batchSize() to configure batch size on batchInsert and batchDelete
+* db: enable rewriteBatchedStatements=true for MySQL
+* api: retire old /_sys/api, promote v2
+* test: replace EnumConversionValidator/EnvResourceValidator with assertJ extension, added validator assertions, refer to core.framework.test.Assertions
+
+### 6.3.3 (5/28/2018 - 6/4/2018)
+* api: make error message more friendly when service response returns value type
+* api: add validation to prevent from using same simple class name for service interface and request/response bean, in order to improve maintainability and simplify API typescript definition generation  
+* api: added /_sys/api/v2 for new version of api definition exposing (client js will read json and generate client code directly)
+* db: fix sql params log should log @DBEnumValue value instead of enum.name()
+
+### 6.3.2 (5/22/2018 - 5/28/2018)
 * site: finalize csp design, make img-src supports data:, use sys.webSecurity.trustedSources to configure 
+* http: update undertow to 2.0.9
+* search: support auto complete
 
 ### 6.3.1 (5/16/2018 - 5/22/2018)
 * site: update site.enableWebSecurity(String... trustedSources) to use CSP to replace x-frame-options since it's deprecated 
-* executor: tweak case when task submit another task to executor, to support async long polling or retry use cases 
+* executor: tweak use case when task submit another task to executor, to support async long polling or retry use cases 
 
 ### 6.3.0 (5/9/2018 - 5/15/2018)
 * http: update undertow to 2.0.7

@@ -23,17 +23,15 @@ public final class ExecutorImpl implements Executor {
     public ExecutorImpl(ExecutorService executor, LogManager logManager, String name) {
         this.executor = executor;
         this.logManager = logManager;
-        this.name = name;
+        this.name = "executor" + (name == null ? "" : "-" + name);
     }
 
-    public void stop() {
-        logger.info("stop executor, name={}", name);
+    public void shutdown(long timeoutInMs) throws InterruptedException {
+        logger.info("shutting down {}", name);
         executor.shutdown();
-        try {
-            executor.awaitTermination(10, TimeUnit.SECONDS);     // wait 10 seconds to finish current tasks
-        } catch (InterruptedException e) {
-            logger.warn("failed to wait all tasks to finish", e);
-        }
+        boolean success = executor.awaitTermination(timeoutInMs, TimeUnit.MILLISECONDS);
+        if (!success) logger.warn("failed to terminate {}", name);
+        else logger.info("{} stopped", name);
     }
 
     @Override

@@ -6,16 +6,25 @@ import core.framework.http.HTTPClientException;
 import core.framework.http.HTTPHeaders;
 import core.framework.http.HTTPMethod;
 import core.framework.http.HTTPRequest;
-import core.framework.util.Charsets;
-import org.apache.http.client.methods.HttpUriRequest;
+import core.framework.http.HTTPResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
+import java.net.ConnectException;
+import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * @author neo
@@ -25,35 +34,98 @@ class HTTPClientImplTest {
 
     @BeforeEach
     void createHTTPClient() {
-        httpClient = new HTTPClientImpl(null, "", Duration.ZERO);
-    }
-
-    @Test
-    void responseBodyWithNoContent() throws IOException {
-        byte[] body = httpClient.responseBody(null);   // apache http client return null for HEAD/204/205/304
-
-        assertEquals("", new String(body, Charsets.UTF_8));
+        httpClient = new HTTPClientImpl(null, "TestUserAgent", Duration.ofSeconds(10), 3, Duration.ZERO);
     }
 
     @Test
     void parseHTTPStatus() {
-        assertEquals(HTTPStatus.OK, HTTPClientImpl.parseHTTPStatus(200));
+        assertThat(HTTPClientImpl.parseHTTPStatus(200)).isEqualTo(HTTPStatus.OK);
     }
 
     @Test
     void parseUnsupportedHTTPStatus() {
-        assertThrows(HTTPClientException.class, () -> HTTPClientImpl.parseHTTPStatus(525));
+        assertThatThrownBy(() -> HTTPClientImpl.parseHTTPStatus(525))
+                .isInstanceOf(HTTPClientException.class);
     }
 
     @Test
     void httpRequest() {
-        HTTPRequest request = new HTTPRequest(HTTPMethod.POST, "http://localhost/uri");
-        request.addParam("query", "value");
+        var request = new HTTPRequest(HTTPMethod.POST, "http://localhost/uri");
+        request.params.put("query", "value");
         request.accept(ContentType.APPLICATION_JSON);
         request.body("text", ContentType.TEXT_PLAIN);
 
-        HttpUriRequest httpRequest = httpClient.httpRequest(request);
-        assertEquals("http://localhost/uri?query=value", httpRequest.getURI().toString());
-        assertEquals(ContentType.APPLICATION_JSON.toString(), httpRequest.getFirstHeader(HTTPHeaders.ACCEPT).getValue());
+        HttpRequest httpRequest = httpClient.httpRequest(request);
+        assertThat(httpRequest.uri().toString()).isEqualTo("http://localhost/uri?query=value");
+        assertThat(httpRequest.headers().firstValue(HTTPHeaders.ACCEPT)).get().isEqualTo(ContentType.APPLICATION_JSON.toString());
+        assertThat(httpRequest.headers().firstValue(HTTPHeaders.USER_AGENT)).get().isEqualTo("TestUserAgent");
+        assertThat(httpRequest.version()).isEmpty();
+    }
+
+    @Test
+    void httpRequestWithInvalidURL() {
+        assertThatThrownBy(() -> httpClient.httpRequest(new HTTPRequest(HTTPMethod.HEAD, "//%%")))
+                .isInstanceOf(HTTPClientException.class)
+                .hasMessageContaining("uri is invalid");
+    }
+
+    @Test
+    void httpRequestWithHTTPS() {
+        var request = new HTTPRequest(HTTPMethod.GET, "https://localhost/uri");
+        HttpRequest httpRequest = httpClient.httpRequest(request);
+        assertThat(httpRequest.uri().toString()).isEqualTo("https://localhost/uri");
+        assertThat(httpRequest.version()).get().isEqualTo(HttpClient.Version.HTTP_2);
+    }
+
+    @Test
+    void response() {
+        @SuppressWarnings("unchecked")
+        HttpResponse<byte[]> httpResponse = mock(HttpResponse.class);
+        when(httpResponse.statusCode()).thenReturn(200);
+        when(httpResponse.headers()).thenReturn(HttpHeaders.of(Map.of("content-type", List.of("text/html"), ":status", List.of("200")), (name, value) -> true));
+
+        HTTPResponse response = httpClient.response(httpResponse);
+        assertThat(response.status).isEqualTo(HTTPStatus.OK);
+        assertThat(response.contentType.mediaType).isEqualTo(ContentType.TEXT_HTML.mediaType);
+        assertThat(response.headers)
+                .doesNotContainKeys(":status")
+                .containsEntry(HTTPHeaders.CONTENT_TYPE, "text/html");
+    }
+
+    @Test
+    void waitTime() {
+        assertThat(httpClient.waitTime(1)).isEqualTo(Duration.ofMillis(500));
+        assertThat(httpClient.waitTime(2)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(httpClient.waitTime(3)).isEqualTo(Duration.ofSeconds(2));
+        assertThat(httpClient.waitTime(4)).isEqualTo(Duration.ofSeconds(4));
+    }
+
+    @Test
+    void shouldRetry() {
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.GET, null, HTTPStatus.OK)).isFalse();
+
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.POST, null, HTTPStatus.CREATED)).isFalse();
+        assertThat(httpClient.shouldRetry(2, HTTPMethod.POST, null, HTTPStatus.CREATED)).isFalse();
+    }
+
+    @Test
+    void shouldRetryWithConnectionException() {
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.GET, new HttpTimeoutException("read timeout"), null)).isTrue();
+        assertThat(httpClient.shouldRetry(2, HTTPMethod.GET, new ConnectException("connection failed"), null)).isTrue();
+        assertThat(httpClient.shouldRetry(3, HTTPMethod.GET, new ConnectException("connection failed"), null)).isFalse();
+
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.POST, new HttpConnectTimeoutException("connection timeout"), null)).isTrue();
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.POST, new HttpTimeoutException("read timeout"), null)).isFalse();
+
+        assertThat(httpClient.shouldRetry(2, HTTPMethod.PUT, new HttpTimeoutException("read timeout"), null)).isTrue();
+    }
+
+    @Test
+    void shouldRetryWithServiceUnavailable() {
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.POST, null, HTTPStatus.SERVICE_UNAVAILABLE)).isTrue();
+        assertThat(httpClient.shouldRetry(3, HTTPMethod.POST, null, HTTPStatus.SERVICE_UNAVAILABLE)).isFalse();
+
+        assertThat(httpClient.shouldRetry(1, HTTPMethod.PUT, null, HTTPStatus.SERVICE_UNAVAILABLE)).isTrue();
+        assertThat(httpClient.shouldRetry(3, HTTPMethod.PUT, null, HTTPStatus.SERVICE_UNAVAILABLE)).isFalse();
     }
 }

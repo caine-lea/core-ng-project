@@ -1,9 +1,10 @@
 package core.framework.module;
 
 import core.framework.http.HTTPMethod;
-import core.framework.impl.kafka.Kafka;
-import core.framework.impl.kafka.KafkaMessageListener;
-import core.framework.impl.kafka.KafkaMessagePublisher;
+import core.framework.impl.kafka.MessageListener;
+import core.framework.impl.kafka.MessageProducer;
+import core.framework.impl.kafka.MessageProducerImpl;
+import core.framework.impl.kafka.MessagePublisherImpl;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.impl.module.ShutdownHook;
@@ -11,12 +12,13 @@ import core.framework.impl.web.management.KafkaController;
 import core.framework.kafka.BulkMessageHandler;
 import core.framework.kafka.MessageHandler;
 import core.framework.kafka.MessagePublisher;
-import core.framework.util.Exceptions;
 import core.framework.util.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -25,55 +27,60 @@ public class KafkaConfig extends Config {
     private final Logger logger = LoggerFactory.getLogger(KafkaConfig.class);
     String name;
     private ModuleContext context;
-    private Kafka kafka;
-    private KafkaMessageListener listener;
+    private String uri;
+    private MessageProducer producer;
+    private MessageListener listener;
     private boolean handlerAdded;
 
     @Override
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
         this.name = name;
-        kafka = createKafka(context, name);
     }
 
     @Override
     protected void validate() {
-        if (kafka.uri == null) throw Exceptions.error("kafka uri must be configured, name={}", name);
         if (!handlerAdded)
-            throw Exceptions.error("kafka is configured, but no producer/consumer added, please remove unnecessary config, name={}", name);
+            throw new Error("kafka is configured, but no producer/consumer added, please remove unnecessary config, name=" + name);
     }
 
-    Kafka createKafka(ModuleContext context, String name) {
-        Kafka kafka = new Kafka(name);
-        context.stat.metrics.add(kafka.producerMetrics);
-        context.shutdownHook.add(ShutdownHook.STAGE_3, kafka::close);
-
-        KafkaController controller = new KafkaController(kafka);
-        context.route(HTTPMethod.GET, managementPathPattern("/topic"), controller::topics, true);
-        context.route(HTTPMethod.PUT, managementPathPattern("/topic/:topic"), controller::updateTopic, true);
-        context.route(HTTPMethod.POST, managementPathPattern("/topic/:topic/message/:key"), controller::publish, true);
-
-        return kafka;
+    public void uri(String uri) {
+        if (this.uri != null)
+            throw new Error(format("kafka uri is already configured, name={}, uri={}, previous={}", name, uri, this.uri));
+        this.uri = uri;
     }
 
-    String managementPathPattern(String postfix) {
-        StringBuilder builder = new StringBuilder("/_sys/kafka");
-        if (name != null) builder.append('/').append(name);
-        builder.append(postfix);
-        return builder.toString();
-    }
-
+    // for use case as replying message back to publisher, so the topic can be dynamic (different services (consumer group) expect to receive reply in their own topic)
     public <T> MessagePublisher<T> publish(Class<T> messageClass) {
         return publish(null, messageClass);
     }
 
     public <T> MessagePublisher<T> publish(String topic, Class<T> messageClass) {
-        if (kafka.uri == null) throw Exceptions.error("kafka uri must be configured first, name={}", name);
-        logger.info("create message publisher, topic={}, messageClass={}, name={}", topic, messageClass.getTypeName(), name);
-        MessagePublisher<T> publisher = new KafkaMessagePublisher<>(kafka.producer(), topic, messageClass, context.logManager);
+        logger.info("publish, topic={}, messageClass={}, name={}", topic, messageClass.getTypeName(), name);
+        if (producer == null) {
+            if (uri == null) throw new Error("kafka uri must be configured first, name=" + name);
+            producer = createProducer();
+        }
+        var publisher = new MessagePublisherImpl<>(producer, topic, messageClass);
         context.beanFactory.bind(Types.generic(MessagePublisher.class, messageClass), name, publisher);
         handlerAdded = true;
         return publisher;
+    }
+
+    MessageProducer createProducer() {
+        var producer = new MessageProducerImpl(uri, name);
+        context.stat.metrics.add(producer.producerMetrics);
+        context.shutdownHook.add(ShutdownHook.STAGE_3, producer::close);
+        var controller = new KafkaController(producer);
+        context.route(HTTPMethod.POST, managementPathPattern("/topic/:topic/message/:key"), controller::publish, true);
+        return producer;
+    }
+
+    String managementPathPattern(String postfix) {
+        var builder = new StringBuilder("/_sys/kafka");
+        if (name != null) builder.append('/').append(name);
+        builder.append(postfix);
+        return builder.toString();
     }
 
     public <T> void subscribe(String topic, Class<T> messageClass, MessageHandler<T> handler) {
@@ -85,25 +92,16 @@ public class KafkaConfig extends Config {
     }
 
     private <T> void subscribe(String topic, Class<T> messageClass, MessageHandler<T> handler, BulkMessageHandler<T> bulkHandler) {
-        logger.info("subscribe topic, topic={}, messageClass={}, handlerClass={}, name={}", topic, messageClass.getTypeName(), handler != null ? handler.getClass().getCanonicalName() : bulkHandler.getClass().getCanonicalName(), name);
+        if (handler == null && bulkHandler == null) throw new Error("handler must not be null");
+        logger.info("subscribe, topic={}, messageClass={}, handlerClass={}, name={}", topic, messageClass.getTypeName(), handler != null ? handler.getClass().getCanonicalName() : bulkHandler.getClass().getCanonicalName(), name);
         listener().subscribe(topic, messageClass, handler, bulkHandler);
         handlerAdded = true;
     }
 
-    public void poolSize(int poolSize) {
-        listener().poolSize = poolSize;
-    }
-
-    public void uri(String uri) {
-        if (kafka.uri != null)
-            throw Exceptions.error("kafka uri is already configured, name={}, uri={}, previous={}", name, uri, kafka.uri);
-        kafka.uri = uri;
-    }
-
-    private KafkaMessageListener listener() {
+    private MessageListener listener() {
         if (listener == null) {
-            if (kafka.uri == null) throw Exceptions.error("kafka uri must be configured first, name={}", name);
-            listener = new KafkaMessageListener(kafka.uri, name, context.logManager);
+            if (uri == null) throw new Error("kafka uri must be configured first, name=" + name);
+            listener = new MessageListener(uri, name, context.logManager);
             context.startupHook.add(listener::start);
             context.shutdownHook.add(ShutdownHook.STAGE_0, timeout -> listener.shutdown());
             context.shutdownHook.add(ShutdownHook.STAGE_1, listener::awaitTermination);
@@ -112,22 +110,26 @@ public class KafkaConfig extends Config {
         return listener;
     }
 
+    public void poolSize(int poolSize) {
+        listener().poolSize = poolSize;
+    }
+
     public void maxProcessTime(Duration maxProcessTime) {
         listener().maxProcessTime = maxProcessTime;
     }
 
     public void maxPoll(int maxRecords, int maxBytes) {
-        if (maxRecords <= 0) throw Exceptions.error("max poll records must be greater than 0, value={}", maxRecords);
-        if (maxBytes <= 0) throw Exceptions.error("max poll bytes must be greater than 0, value={}", maxBytes);
-        KafkaMessageListener listener = listener();
+        if (maxRecords <= 0) throw new Error(format("max poll records must be greater than 0, value={}", maxRecords));
+        if (maxBytes <= 0) throw new Error(format("max poll bytes must be greater than 0, value={}", maxBytes));
+        MessageListener listener = listener();
         listener.maxPollRecords = maxRecords;
         listener.maxPollBytes = maxBytes;
     }
 
     public void minPoll(int minBytes, Duration maxWaitTime) {
-        if (minBytes <= 0) throw Exceptions.error("min poll bytes must be greater than 0, value={}", minBytes);
-        if (maxWaitTime == null || maxWaitTime.toMillis() <= 0) throw Exceptions.error("max wait time must be greater than 0, value={}", maxWaitTime);
-        KafkaMessageListener listener = listener();
+        if (minBytes <= 0) throw new Error(format("min poll bytes must be greater than 0, value={}", minBytes));
+        if (maxWaitTime == null || maxWaitTime.toMillis() <= 0) throw new Error(format("max wait time must be greater than 0, value={}", maxWaitTime));
+        MessageListener listener = listener();
         listener.minPollBytes = minBytes;
         listener.minPollMaxWaitTime = maxWaitTime;
     }

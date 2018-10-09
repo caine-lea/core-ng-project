@@ -2,11 +2,12 @@ package core.framework.impl.db;
 
 import core.framework.db.DBEnumValue;
 import core.framework.impl.reflect.Enums;
-import core.framework.util.Exceptions;
 import core.framework.util.Maps;
 
 import java.util.EnumMap;
 import java.util.Map;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -28,11 +29,10 @@ final class EnumDBMapper {
     }
 
     String getDBValue(Enum<?> value) {
-        @SuppressWarnings("unchecked")
-        Class<? extends Enum<?>> enumClass = (Class<? extends Enum<?>>) value.getClass();
+        Class<? extends Enum<?>> enumClass = value.getDeclaringClass();
         Map<Enum<?>, String> mapping = mappings.get(enumClass);
         if (mapping == null)
-            throw Exceptions.error("enum class is not registered, register in module by db().view() or db().repository(), enumClass={}", enumClass.getCanonicalName());
+            throw new Error(format("enum class is not registered, register in module by db().view() or db().repository(), enumClass={}", enumClass.getCanonicalName()));
         return mapping.get(value);  // this won't return null since all fields of enum are registered
     }
 }

@@ -1,0 +1,22 @@
+{
+  "index_patterns": "document-*",
+  "order": 1,
+  "settings": {
+    "number_of_shards": 1
+  },
+  "mappings": {
+    "document": {
+      "properties": {
+        "string_field": {
+          "type": "text"
+        },
+        "num_field": {
+          "type": "integer"
+        },
+        "zoned_date_time_field": {
+          "type": "date"
+        }
+      }
+    }
+  }
+}

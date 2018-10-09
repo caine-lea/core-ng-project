@@ -9,8 +9,8 @@ import java.lang.reflect.Type;
  * @author neo
  */
 public final class Literal {
-    public static String type(Type type) {
-        return GenericTypes.rawClass(type).getCanonicalName();
+    public static String type(Class<?> value) {
+        return value.getCanonicalName();
     }
 
     public static String variable(Enum<?> value) {
@@ -30,8 +30,9 @@ public final class Literal {
     public static String variable(String text) {
         if (text == null) return "null";
 
-        StringBuilder builder = new StringBuilder("\"");
-        for (int i = 0; i < text.length(); i++) {
+        var builder = new StringBuilder("\"");
+        int length = text.length();
+        for (int i = 0; i < length; i++) {
             char ch = text.charAt(i);
             switch (ch) {
                 case '\n':

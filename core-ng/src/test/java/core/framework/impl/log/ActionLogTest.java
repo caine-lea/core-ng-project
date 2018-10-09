@@ -1,6 +1,6 @@
 package core.framework.impl.log;
 
-import core.framework.impl.log.filter.LogFilter;
+import core.framework.impl.log.message.PerformanceStat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,13 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author neo
  */
 class ActionLogTest {
-    private LogFilter filter;
     private ActionLog log;
 
     @BeforeEach
     void createActionLog() {
-        filter = new LogFilter();
-        log = new ActionLog("begin", filter);
+        log = new ActionLog("begin");
     }
 
     @Test
@@ -47,7 +45,7 @@ class ActionLogTest {
 
     @Test
     void flushTraceLogWithWarning() {
-        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null, filter));
+        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null));
 
         assertTrue(log.flushTraceLog());
     }
@@ -56,7 +54,7 @@ class ActionLogTest {
     void result() {
         assertEquals("OK", log.result());
 
-        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null, filter));
+        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null));
         assertEquals("WARN", log.result());
     }
 
@@ -64,13 +62,13 @@ class ActionLogTest {
     void errorCode() {
         assertNull(log.errorCode());
 
-        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null, filter));
+        log.process(new LogEvent("logger", null, LogLevel.WARN, null, null, null));
         assertEquals("UNASSIGNED", log.errorCode());
     }
 
     @Test
     void truncateErrorMessage() {
-        log.process(new LogEvent("logger", null, LogLevel.WARN, longString(300), null, null, filter));
+        log.process(new LogEvent("logger", null, LogLevel.WARN, longString(300), null, null));
 
         assertEquals(200, log.errorMessage.length());
     }
@@ -88,17 +86,24 @@ class ActionLogTest {
     void track() {
         log.track("db", 1000, 1, 0);
         PerformanceStat stat = log.performanceStats.get("db");
-        assertEquals(1, stat.count);
-        assertEquals(1000, stat.totalElapsed);
-        assertEquals(1, stat.readEntries.intValue());
-        assertEquals(0, stat.writeEntries.intValue());
+        assertThat(stat.count).isEqualTo(1);
+        assertThat(stat.totalElapsed).isEqualTo(1000);
+        assertThat(stat.readEntries).isEqualTo(1);
+        assertThat(stat.writeEntries).isEqualTo(0);
 
         log.track("db", 1000, 1, 1);
         stat = log.performanceStats.get("db");
-        assertEquals(2, stat.count);
-        assertEquals(2000, stat.totalElapsed);
-        assertEquals(2, stat.readEntries.intValue());
-        assertEquals(1, stat.writeEntries.intValue());
+        assertThat(stat.count).isEqualTo(2);
+        assertThat(stat.totalElapsed).isEqualTo(2000);
+        assertThat(stat.readEntries).isEqualTo(2);
+        assertThat(stat.writeEntries).isEqualTo(1);
+
+        log.track("http", 3000, null, null);
+        stat = log.performanceStats.get("http");
+        assertThat(stat.count).isEqualTo(1);
+        assertThat(stat.totalElapsed).isEqualTo(3000);
+        assertThat(stat.readEntries).isNull();
+        assertThat(stat.writeEntries).isNull();
     }
 
     private String longString(int length) {

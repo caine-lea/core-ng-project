@@ -17,45 +17,49 @@ import java.util.Map;
  */
 public class StatService {
     @Inject
+    IndexService indexService;
+    @Inject
     ElasticSearchType<StatDocument> statType;
 
     public void index(List<StatMessage> messages) {
-        LocalDate now = LocalDate.now();
-        index(messages, now);
+        index(messages, LocalDate.now());
     }
 
     public void index(StatMessage message) {
-        LocalDate now = LocalDate.now();
-        index(message, now);
+        index(message.id, stat(message), LocalDate.now());
     }
 
     void index(List<StatMessage> messages, LocalDate now) {
         if (messages.size() <= 5) { // use single index in quiet time
             for (StatMessage message : messages) {
-                index(message, now);
+                index(message.id, stat(message), now);
             }
         } else {
             Map<String, StatDocument> stats = Maps.newHashMapWithExpectedSize(messages.size());
             for (StatMessage message : messages) {
                 stats.put(message.id, stat(message));
             }
-            BulkIndexRequest<StatDocument> request = new BulkIndexRequest<>();
-            request.index = IndexName.name("stat", now);
-            request.sources = stats;
-            statType.bulkIndex(request);
+            index(stats, now);
         }
     }
 
-    private void index(StatMessage message, LocalDate now) {
+    private void index(Map<String, StatDocument> stats, LocalDate now) {
+        BulkIndexRequest<StatDocument> request = new BulkIndexRequest<>();
+        request.index = indexService.indexName("stat", now);
+        request.sources = stats;
+        statType.bulkIndex(request);
+    }
+
+    private void index(String id, StatDocument stat, LocalDate now) {
         IndexRequest<StatDocument> request = new IndexRequest<>();
-        request.index = IndexName.name("stat", now);
-        request.id = message.id;
-        request.source = stat(message);
+        request.index = indexService.indexName("stat", now);
+        request.id = id;
+        request.source = stat;
         statType.index(request);
     }
 
     private StatDocument stat(StatMessage message) {
-        StatDocument stat = new StatDocument();
+        var stat = new StatDocument();
         stat.date = message.date;
         stat.app = message.app;
         stat.serverIP = message.serverIP;

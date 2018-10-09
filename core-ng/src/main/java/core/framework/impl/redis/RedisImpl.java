@@ -1,12 +1,15 @@
 package core.framework.impl.redis;
 
-import core.framework.impl.log.filter.BytesParam;
+import core.framework.impl.log.filter.ArrayLogParam;
+import core.framework.impl.log.filter.BytesLogParam;
+import core.framework.impl.log.filter.MapLogParam;
 import core.framework.impl.resource.Pool;
 import core.framework.impl.resource.PoolItem;
 import core.framework.log.ActionLogContext;
 import core.framework.log.Markers;
 import core.framework.redis.Redis;
 import core.framework.redis.RedisHash;
+import core.framework.redis.RedisList;
 import core.framework.redis.RedisSet;
 import core.framework.util.Maps;
 import core.framework.util.StopWatch;
@@ -19,6 +22,14 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import static core.framework.impl.redis.Protocol.Command.DEL;
+import static core.framework.impl.redis.Protocol.Command.EXPIRE;
+import static core.framework.impl.redis.Protocol.Command.GET;
+import static core.framework.impl.redis.Protocol.Command.INCRBY;
+import static core.framework.impl.redis.Protocol.Command.MGET;
+import static core.framework.impl.redis.Protocol.Command.MSET;
+import static core.framework.impl.redis.Protocol.Command.SCAN;
+import static core.framework.impl.redis.Protocol.Command.SET;
 import static core.framework.impl.redis.Protocol.Keyword.COUNT;
 import static core.framework.impl.redis.Protocol.Keyword.EX;
 import static core.framework.impl.redis.Protocol.Keyword.MATCH;
@@ -33,11 +44,12 @@ public final class RedisImpl implements Redis {
     private final Logger logger = LoggerFactory.getLogger(RedisImpl.class);
     private final RedisSet redisSet = new RedisSetImpl(this);
     private final RedisHash redisHash = new RedisHashImpl(this);
+    private final RedisList redisList = new RedisListImpl(this);
     private final String name;
     public Pool<RedisConnection> pool;
     public String host;
     long slowOperationThresholdInNanos = Duration.ofMillis(500).toNanos();
-    Duration timeout;
+    int timeoutInMs;
 
     public RedisImpl(String name) {
         this.name = name;
@@ -48,7 +60,7 @@ public final class RedisImpl implements Redis {
     }
 
     public void timeout(Duration timeout) {
-        this.timeout = timeout;
+        timeoutInMs = (int) timeout.toMillis();
         pool.checkoutTimeout(timeout);
     }
 
@@ -59,8 +71,8 @@ public final class RedisImpl implements Redis {
     private RedisConnection createConnection() {
         if (host == null) throw new Error("redis.host must not be null");
         try {
-            RedisConnection connection = new RedisConnection(host, timeout);
-            connection.connect();
+            var connection = new RedisConnection();
+            connection.connect(host, timeoutInMs);
             return connection;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -78,65 +90,23 @@ public final class RedisImpl implements Redis {
     }
 
     public byte[] getBytes(String key) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        byte[] value = null;
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.GET, encode(key));
-            return connection.readBulkString();
+            connection.writeKeyCommand(GET, key);
+            value = connection.readBulkString();
+            return value;
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 1, 0);
-            logger.debug("get, key={}, elapsedTime={}", key, elapsedTime);
-            checkSlowOperation(elapsedTime);
-        }
-    }
-
-    @Override
-    public void set(String key, String value) {
-        StopWatch watch = new StopWatch();
-        PoolItem<RedisConnection> item = pool.borrowItem();
-        try {
-            RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.SET, encode(key), encode(value));
-            connection.readSimpleString();
-        } catch (IOException e) {
-            item.broken = true;
-            throw new UncheckedIOException(e);
-        } finally {
-            pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("set, key={}, value={}, elapsedTime={}", key, value, elapsedTime);
-            checkSlowOperation(elapsedTime);
-        }
-    }
-
-    @Override
-    public void set(String key, String value, Duration expiration) {
-        set(key, encode(value), expiration);
-    }
-
-    public void set(String key, byte[] value, Duration expiration) {
-        StopWatch watch = new StopWatch();
-        PoolItem<RedisConnection> item = pool.borrowItem();
-        try {
-            RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.SETEX, encode(key), encode(expiration.getSeconds()), value);
-            connection.readSimpleString();
-        } catch (IOException e) {
-            item.broken = true;
-            throw new UncheckedIOException(e);
-        } finally {
-            pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("set, key={}, value={}, expiration={}, elapsedTime={}", key, new BytesParam(value), expiration, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 1, 0);
+            logger.debug("get, key={}, returnedValue={}, elapsed={}", key, new BytesLogParam(value), elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
@@ -146,83 +116,104 @@ public final class RedisImpl implements Redis {
     }
 
     @Override
-    public boolean setIfAbsent(String key, String value, Duration expiration) {
-        StopWatch watch = new StopWatch();
+    public boolean set(String key, String value, Duration expiration, boolean onlyIfAbsent) {
+        return set(key, encode(value), expiration, onlyIfAbsent);
+    }
+
+    public boolean set(String key, byte[] value, Duration expiration, boolean onlyIfAbsent) {
+        var watch = new StopWatch();
+        boolean updated = false;
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.SET, encode(key), encode(value), NX, EX, encode(expiration.getSeconds()));
+            int length = 3 + (onlyIfAbsent ? 1 : 0) + (expiration != null ? 2 : 0);
+            connection.writeArray(length);
+            connection.writeBulkString(SET);
+            connection.writeBulkString(encode(key));
+            connection.writeBulkString(value);
+            if (onlyIfAbsent) connection.writeBulkString(NX);
+            if (expiration != null) {
+                connection.writeBulkString(EX);
+                connection.writeBulkString(encode(expiration.getSeconds()));
+            }
+            connection.flush();
             String result = connection.readSimpleString();
-            return "OK".equals(result);
+            updated = "OK".equals(result);
+            return updated;
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("setIfAbsent, key={}, value={}, expiration={}, elapsedTime={}", key, value, expiration, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 0, updated ? 1 : 0);
+            logger.debug("set, key={}, value={}, expiration={}, onlyIfAbsent={}, updated={}, elapsed={}", key, new BytesLogParam(value), expiration, onlyIfAbsent, updated, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
     public void expire(String key, Duration expiration) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.EXPIRE, encode(key), encode(expiration.getSeconds()));
+            connection.writeKeyArgumentCommand(EXPIRE, key, encode(expiration.getSeconds()));
             connection.readLong();
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("expire, key={}, expiration={}, elapsedTime={}", key, expiration, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 0, 1);
+            logger.debug("expire, key={}, expiration={}, elapsed={}", key, expiration, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
-    public boolean del(String key) {
-        StopWatch watch = new StopWatch();
+    public long del(String... keys) {
+        var watch = new StopWatch();
+        if (keys.length == 0) throw new Error("keys must not be empty");
+        long deletedKeys = 0;
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.DEL, encode(key));
-            return connection.readLong() == 1;
+            connection.writeKeysCommand(DEL, keys);
+            deletedKeys = connection.readLong();
+            return deletedKeys;
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("del, key={}, elapsedTime={}", key, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 0, (int) deletedKeys);
+            logger.debug("del, keys={}, size={}, deletedKeys={}, elapsed={}", new ArrayLogParam(keys), keys.length, deletedKeys, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
     public long increaseBy(String key, long increment) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        long value = 0;
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.INCRBY, encode(key), encode(increment));
-            return connection.readLong();
+            connection.writeKeyArgumentCommand(INCRBY, key, encode(increment));
+            value = connection.readLong();
+            return value;
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, 1);
-            logger.debug("increaseBy, key={}, increment={}, elapsedTime={}", key, increment, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 0, 1);
+            logger.debug("increaseBy, key={}, increment={}, returnedValue={}, elapsed={}", key, increment, value, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
@@ -237,16 +228,13 @@ public final class RedisImpl implements Redis {
     }
 
     public Map<String, byte[]> multiGetBytes(String... keys) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        if (keys.length == 0) throw new Error("keys must not be empty");
+        Map<String, byte[]> values = Maps.newHashMapWithExpectedSize(keys.length);
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            byte[][] arguments = new byte[keys.length][];
-            for (int i = 0; i < keys.length; i++) {
-                arguments[i] = encode(keys[i]);
-            }
-            Map<String, byte[]> values = Maps.newHashMapWithExpectedSize(keys.length);
-            connection.write(Protocol.Command.MGET, arguments);
+            connection.writeKeysCommand(MGET, keys);
             Object[] response = connection.readArray();
             for (int i = 0; i < response.length; i++) {
                 byte[] value = (byte[]) response[i];
@@ -258,53 +246,68 @@ public final class RedisImpl implements Redis {
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, keys.length, 0);
-            logger.debug("mget, keys={}, elapsedTime={}", keys, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, values.size(), 0);
+            logger.debug("mget, keys={}, size={}, returnedValues={}, elapsed={}", new ArrayLogParam(keys), keys.length, new BytesValueMapLogParam(values), elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
     public void multiSet(Map<String, String> values) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        if (values.isEmpty()) throw new Error("values must not be empty");
         PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            connection.write(Protocol.Command.MSET, encode(values));
+            connection.writeArray(1 + values.size() * 2);
+            connection.writeBulkString(MSET);
+            for (Map.Entry<String, String> entry : values.entrySet()) {
+                connection.writeBulkString(encode(entry.getKey()));
+                connection.writeBulkString(encode(entry.getValue()));
+            }
+            connection.flush();
             connection.readSimpleString();
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, values.size());
-            logger.debug("mset, values={}, elapsedTime={}", values, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            int size = values.size();
+            ActionLogContext.track("redis", elapsed, 0, size);
+            logger.debug("mset, values={}, size={}, elapsed={}", new MapLogParam(values), size, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     public void multiSet(Map<String, byte[]> values, Duration expiration) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        if (values.isEmpty()) throw new Error("values must not be empty");
         byte[] expirationValue = encode(expiration.getSeconds());
-        PoolItem<RedisConnection> item = pool.borrowItem();
         int size = values.size();
+        PoolItem<RedisConnection> item = pool.borrowItem();
         try {
             RedisConnection connection = item.resource;
-            for (Map.Entry<String, byte[]> entry : values.entrySet()) {
-                connection.write(Protocol.Command.SETEX, encode(entry.getKey()), expirationValue, entry.getValue());
+            for (Map.Entry<String, byte[]> entry : values.entrySet()) { // redis doesn't support mset with expiration, here to use pipeline
+                connection.writeArray(5);
+                connection.writeBulkString(SET);
+                connection.writeBulkString(encode(entry.getKey()));
+                connection.writeBulkString(entry.getValue());
+                connection.writeBulkString(EX);
+                connection.writeBulkString(expirationValue);
             }
+            connection.flush();
             connection.readAll(size);
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, 0, size);
-            logger.debug("mset, values={}, expiration={}, elapsedTime={}", values, expiration, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", elapsed, 0, size);
+            logger.debug("mset, values={}, size={}, expiration={}, elapsed={}", new BytesValueMapLogParam(values), size, expiration, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
@@ -315,37 +318,53 @@ public final class RedisImpl implements Redis {
 
     @Override
     public void forEach(String pattern, Consumer<String> consumer) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
+        long start = System.nanoTime();
+        long redisTook = 0;
         PoolItem<RedisConnection> item = pool.borrowItem();
-        int count = 0;
+        int returnedKeys = 0;
         try {
             RedisConnection connection = item.resource;
             byte[] batchSize = encode("500"); // use 500 as batch
             String cursor = "0";
             do {
-                connection.write(Protocol.Command.SCAN, encode(cursor), MATCH, encode(pattern), COUNT, batchSize);
+                connection.writeArray(6);
+                connection.writeBulkString(SCAN);
+                connection.writeBulkString(encode(cursor));
+                connection.writeBulkString(MATCH);
+                connection.writeBulkString(encode(pattern));
+                connection.writeBulkString(COUNT);
+                connection.writeBulkString(batchSize);
+                connection.flush();
                 Object[] response = connection.readArray();
                 cursor = decode((byte[]) response[0]);
                 Object[] keys = (Object[]) response[1];
+                returnedKeys += keys.length;
+                redisTook += System.nanoTime() - start;
                 for (Object key : keys) {
                     consumer.accept(decode((byte[]) key));
                 }
-                count += keys.length;
+                start = System.nanoTime();
             } while (!"0".equals(cursor));
         } catch (IOException e) {
             item.broken = true;
             throw new UncheckedIOException(e);
         } finally {
             pool.returnItem(item);
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("redis", elapsedTime, count, 0);
-            logger.debug("forEach, pattern={}, count={}, elapsedTime={}", pattern, count, elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("redis", redisTook, returnedKeys, 0);
+            logger.debug("forEach, pattern={}, returnedKeys={}, redisTook={}, elapsed={}", pattern, returnedKeys, redisTook, elapsed);
         }
     }
 
-    void checkSlowOperation(long elapsedTime) {
-        if (elapsedTime > slowOperationThresholdInNanos) {
-            logger.warn(Markers.errorCode("SLOW_REDIS"), "slow redis operation, elapsedTime={}", elapsedTime);
+    @Override
+    public RedisList list() {
+        return redisList;
+    }
+
+    void checkSlowOperation(long elapsed) {
+        if (elapsed > slowOperationThresholdInNanos) {
+            logger.warn(Markers.errorCode("SLOW_REDIS"), "slow redis operation, elapsed={}", elapsed);
         }
     }
 }

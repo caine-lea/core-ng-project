@@ -1,6 +1,7 @@
 package core.framework.impl.db;
 
 import core.framework.db.Transaction;
+import core.framework.db.UncheckedSQLException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * @author neo
@@ -119,6 +121,17 @@ class DatabaseImplTest {
     }
 
     @Test
+    void batchExecute() {
+        insertRow(1, "string1", TestEnum.V1);
+        insertRow(2, "string2", TestEnum.V2);
+
+        List<Object[]> params = List.of(new Object[]{"string3", 1}, new Object[]{"string4", 2});
+        int[] results = database.batchExecute("UPDATE database_test SET string_field = ? WHERE id = ?", params);
+
+        assertThat(results).containsExactly(1, 1);
+    }
+
+    @Test
     void rollbackTransaction() {
         try (Transaction transaction = database.beginTransaction()) {
             insertRow(1, "string", TestEnum.V1);
@@ -127,6 +140,20 @@ class DatabaseImplTest {
 
         Optional<EntityView> result = database.selectOne("SELECT string_field as string_label, enum_field as enum_label FROM database_test where id = ?", EntityView.class, 1);
         assertThat(result).isNotPresent();
+    }
+
+    @Test
+    void rollbackTransactionWithException() {
+        assertThatThrownBy(() -> {
+            try (Transaction transaction = database.beginTransaction()) {
+                insertRow(1, "string", TestEnum.V1);
+                database.execute("invalid sql");
+                transaction.commit();
+            }
+        }).isInstanceOf(UncheckedSQLException.class);
+
+        int count = database.selectOne("SELECT count(1) FROM database_test where id = ?", Integer.class, 1).orElse(0);
+        assertThat(count).isZero();
     }
 
     private void insertRow(int id, String stringField, TestEnum enumField) {

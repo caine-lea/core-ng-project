@@ -1,9 +1,10 @@
 package core.framework.test;
 
 import core.framework.test.module.AbstractTestModule;
-import core.framework.util.Exceptions;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestInstancePostProcessor;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -22,7 +23,7 @@ public final class IntegrationExtension implements TestInstancePostProcessor {
     private AbstractTestModule createTestModule(Class<?> testClass, ExtensionContext.Store store) {
         Boolean initialized = store.get(KEY_INITIALIZED, Boolean.class);
         if (Boolean.TRUE.equals(initialized)) throw new Error("test context failed to initialize, please check error message from previous integration test");
-        store.put(KEY_INITIALIZED, true);
+        store.put(KEY_INITIALIZED, Boolean.TRUE);
         Context context = findContext(testClass);
         try {
             AbstractTestModule module = context.module().getConstructor().newInstance();
@@ -40,6 +41,6 @@ public final class IntegrationExtension implements TestInstancePostProcessor {
             if (context != null) return context;
             currentClass = currentClass.getSuperclass();
         }
-        throw Exceptions.error("integration test must have @Context, testClass={}", testClass.getCanonicalName());
+        throw new Error(format("integration test must have @Context, testClass={}", testClass.getCanonicalName()));
     }
 }

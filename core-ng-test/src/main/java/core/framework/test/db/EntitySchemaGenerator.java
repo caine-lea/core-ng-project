@@ -8,7 +8,6 @@ import core.framework.db.PrimaryKey;
 import core.framework.db.Table;
 import core.framework.impl.asm.CodeBuilder;
 import core.framework.impl.reflect.Classes;
-import core.framework.util.Exceptions;
 import core.framework.util.Lists;
 import core.framework.util.StopWatch;
 import core.framework.util.Strings;
@@ -21,6 +20,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.util.List;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -37,21 +38,21 @@ public final class EntitySchemaGenerator {
     }
 
     public void generate() {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         List<String> statements = schemeStatements();
         try {
             for (String statement : statements) {
                 database.execute(statement);
             }
         } finally {
-            logger.info("create schema, entityClass={}, sql={}, elapsedTime={}", entityClass.getCanonicalName(), statements, watch.elapsedTime());
+            logger.info("create schema, entityClass={}, sql={}, elapsed={}", entityClass.getCanonicalName(), statements, watch.elapsed());
         }
     }
 
     private List<String> schemeStatements() {
         List<String> statements = Lists.newArrayList();
 
-        CodeBuilder builder = new CodeBuilder()
+        var builder = new CodeBuilder()
                 .append("CREATE TABLE ");
         Table table = entityClass.getDeclaredAnnotation(Table.class);
         builder.append(table.name()).append(" (");
@@ -67,7 +68,7 @@ public final class EntitySchemaGenerator {
 
             if (primaryKey != null) {
                 if (primaryKey.autoIncrement()) builder.append(" AUTO_INCREMENT");
-                if (!Strings.isEmpty(primaryKey.sequence())) {
+                if (!Strings.isBlank(primaryKey.sequence())) {
                     statements.add("CREATE SEQUENCE IF NOT EXISTS " + primaryKey.sequence());
                 }
                 primaryKeys.add(column.name());
@@ -114,6 +115,6 @@ public final class EntitySchemaGenerator {
         if (LocalDate.class.equals(fieldClass)) {
             return "DATE";
         }
-        throw Exceptions.error("unsupported field class, class={}", fieldClass.getCanonicalName());
+        throw new Error(format("unsupported field class, class={}", fieldClass.getCanonicalName()));
     }
 }

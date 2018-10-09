@@ -20,7 +20,7 @@ class PropertiesTest {
     }
 
     @Test
-    void getEmptyValue() {
+    void testGetEmptyValue() {
         properties.set("key", "");
 
         assertFalse(properties.get("key").isPresent());
@@ -33,7 +33,7 @@ class PropertiesTest {
     }
 
     @Test
-    void setExistedKey() {
+    void setWithDuplicateKey() {
         Error error = assertThrows(Error.class, () -> {
             properties.set("key1", "value1");
             properties.set("key1", "value2");

@@ -27,7 +27,7 @@ public class ValidatorAssert extends AbstractAssert<ValidatorAssert, Object> {
             failWithMessage("%nExpecting:%n object %s%nto be valid, but found some violations:%n %s", actual.getClass().getName(), errors.errors);
     }
 
-    public MapAssert<String, String> hasError() {
+    public MapAssert<String, String> errors() {
         ValidationErrors errors = validate();
         if (!errors.hasError())
             failWithMessage("%nExpecting:%n object %s%nto be invalid, but found no violation", actual.getClass().getName());
@@ -42,11 +42,11 @@ public class ValidatorAssert extends AbstractAssert<ValidatorAssert, Object> {
 
     private BeanValidator validator(Object bean) {
         Class<?> beanClass = bean.getClass();
-        BeanValidatorBuilder builder = new BeanValidatorBuilder(beanClass, Field::getName);
-        Optional<BeanValidator> validatorOptional = builder.build();
-        if (!validatorOptional.isPresent()) {
+        var builder = new BeanValidatorBuilder(beanClass, Field::getName);
+        Optional<BeanValidator> validator = builder.build();
+        if (!validator.isPresent()) {
             failWithMessage("%nExpecting:%n  %s%nhas validation annotations, but was not found", beanClass.getName());
         }
-        return validatorOptional.orElseThrow();
+        return validator.orElseThrow();
     }
 }

@@ -5,7 +5,6 @@ import core.framework.api.json.Property;
 import core.framework.api.validate.Length;
 import core.framework.api.validate.Max;
 import core.framework.api.validate.Min;
-import core.framework.api.validate.NotEmpty;
 import core.framework.api.validate.NotNull;
 import core.framework.api.validate.Pattern;
 import core.framework.api.validate.Size;
@@ -49,6 +48,10 @@ public interface TestWebService {
     @Path("/test/:id")
     void patch(@PathParam("id") Integer id, TestRequest request);
 
+    @GET
+    @Path("/test/:id/:enum")
+    TestResponse getEnum(@PathParam("id") Long id, @PathParam("enum") TestEnum enumValue);
+
     enum TestEnum {
         @Property(name = "A1")
         A,
@@ -58,7 +61,6 @@ public interface TestWebService {
 
     class TestRequest {
         @NotNull
-        @NotEmpty
         @Pattern("\\d+.*")
         @Length(max = 10)
         @Property(name = "string_field")

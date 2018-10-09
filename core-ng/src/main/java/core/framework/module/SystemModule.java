@@ -1,12 +1,13 @@
 package core.framework.module;
 
-import core.framework.util.Exceptions;
 import core.framework.util.Properties;
 import core.framework.util.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Set;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -31,7 +32,7 @@ public final class SystemModule extends Module {
     private final Set<String> allowedKeys = Set.of(SYS_JDBC_URL, SYS_JDBC_USER, SYS_JDBC_PASSWORD,
             SYS_LOG_APPENDER, SYS_HTTP_ALLOW_CIDR, SYS_HTTP_PORT, SYS_HTTPS_PORT,
             SYS_SECURITY_CSP, SYS_PUBLISH_API_ALLOW_CIDR, SYS_CDN_HOST, SYS_SESSION_HOST,
-            SYS_CACHE_HOST, SYS_REDIS_HOST, SYS_KAFKA_URI);
+            SYS_CACHE_HOST, SYS_REDIS_HOST, SYS_KAFKA_URI, "sys.elasticsearch.host", "sys.mongo.uri"); // allow elasticsearch and mongo as optional modules
     private final String propertyFileClasspath;
 
     public SystemModule(String propertyFileClasspath) {
@@ -56,7 +57,7 @@ public final class SystemModule extends Module {
 
     void loadProperties(Properties properties) {
         for (String key : properties.keys()) {
-            if (!allowedKeys.contains(key)) throw Exceptions.error("found unknown system module key, key={}, allowedKeys={}", key, allowedKeys);
+            if (!allowedKeys.contains(key)) throw new Error(format("found unknown system module key, key={}, allowedKeys={}", key, allowedKeys));
             context.propertyManager.properties.set(key, properties.get(key).orElse(null));
         }
     }

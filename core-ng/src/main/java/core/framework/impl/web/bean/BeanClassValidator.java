@@ -1,26 +1,26 @@
 package core.framework.impl.web.bean;
 
-import core.framework.impl.validate.type.JSONTypeValidator;
+import core.framework.impl.validate.type.JSONClassValidator;
 
 /**
  * @author neo
  */
-final class BeanClassValidator extends JSONTypeValidator {
-    private final BeanClassNameValidator classNameValidator;
+final class BeanClassValidator extends JSONClassValidator {
+    private final BeanMapperRegistry registry;
 
-    BeanClassValidator(Class<?> beanClass, BeanClassNameValidator classNameValidator) {
+    BeanClassValidator(Class<?> beanClass, BeanMapperRegistry registry) {
         super(beanClass);
-        this.classNameValidator = classNameValidator;
+        this.registry = registry;
     }
 
     @Override
     public void visitEnum(Class<?> enumClass, String parentPath) {
         super.visitEnum(enumClass, parentPath);
-        classNameValidator.validateBeanClass(enumClass);
+        registry.validateBeanClassName(enumClass);
     }
 
     @Override
     public void visitClass(Class<?> objectClass, String path) {
-        classNameValidator.validateBeanClass(objectClass);
+        registry.validateBeanClassName(objectClass);
     }
 }

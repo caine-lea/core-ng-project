@@ -1,6 +1,5 @@
 package core.framework.impl.cache;
 
-import core.framework.util.Maps;
 import core.framework.util.Strings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,7 @@ class LocalCacheStoreTest {
     }
 
     @Test
-    void getAll() {
+    void testGetAll() {
         Map<String, byte[]> values = cacheStore.getAll("key1", "key2");
         assertNull(values.get("key1"));
         assertNull(values.get("key2"));
@@ -40,7 +39,7 @@ class LocalCacheStoreTest {
     }
 
     @Test
-    void getExpiredKey() {
+    void testGetWithExpiredKey() {
         byte[] value = Strings.bytes("value");
         cacheStore.put("key1", value, Duration.ZERO);
 
@@ -59,9 +58,8 @@ class LocalCacheStoreTest {
 
     @Test
     void putAll() {
-        Map<String, byte[]> values = Maps.newHashMap();
-        values.put("key1", Strings.bytes("1"));
-        values.put("key2", Strings.bytes("2"));
+        var values = Map.of("key1", Strings.bytes("1"),
+                "key2", Strings.bytes("2"));
         cacheStore.putAll(values, Duration.ofMinutes(1));
 
         assertEquals(2, cacheStore.caches.size());
@@ -70,7 +68,8 @@ class LocalCacheStoreTest {
     @Test
     void delete() {
         cacheStore.put("key1", Strings.bytes("value"), Duration.ofMinutes(1));
-        cacheStore.delete("key1");
+        cacheStore.put("key2", Strings.bytes("value"), Duration.ofMinutes(1));
+        cacheStore.delete("key1", "key2");
 
         assertEquals(0, cacheStore.caches.size());
     }

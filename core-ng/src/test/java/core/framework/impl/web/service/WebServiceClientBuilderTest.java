@@ -1,19 +1,17 @@
 package core.framework.impl.web.service;
 
 import core.framework.http.HTTPMethod;
+import core.framework.impl.asm.CodeBuilder;
 import core.framework.util.ClasspathResources;
-import core.framework.util.Maps;
 import core.framework.util.Types;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.util.Map;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.startsWith;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,41 +33,63 @@ class WebServiceClientBuilderTest {
     @Test
     void sourceCode() {
         String sourceCode = builder.builder.sourceCode();
-        assertEquals(ClasspathResources.text("webservice-test/test-webservice-client.java"), sourceCode);
+        assertThat(sourceCode).isEqualTo(ClasspathResources.text("webservice-test/test-webservice-client.java"));
     }
 
     @Test
     void get() {
         TestWebService.TestResponse expectedResponse = new TestWebService.TestResponse();
 
-        when(webServiceClient.serviceURL(startsWith("/test/:id"), eq(Maps.newHashMap("id", 1))))
-                .thenReturn("http://localhost/test/1");
-        when(webServiceClient.execute(HTTPMethod.GET, "http://localhost/test/1", null, null, Types.optional(TestWebService.TestResponse.class)))
+        when(webServiceClient.execute(HTTPMethod.GET, "/test/1", null, null, Types.optional(TestWebService.TestResponse.class)))
                 .thenReturn(Optional.of(expectedResponse));
 
-        TestWebService.TestResponse response = client.get(1).get();
-        assertSame(expectedResponse, response);
+        TestWebService.TestResponse response = client.get(1).orElseThrow();
+        assertThat(response).isSameAs(expectedResponse);
     }
 
     @Test
     void create() {
-        when(webServiceClient.serviceURL(startsWith("/test/:id"), eq(Maps.newHashMap("id", 1))))
-                .thenReturn("http://localhost/test/1");
-
         TestWebService.TestRequest request = new TestWebService.TestRequest();
         client.create(1, request);
 
-        verify(webServiceClient).execute(HTTPMethod.PUT, "http://localhost/test/1", TestWebService.TestRequest.class, request, void.class);
+        verify(webServiceClient).execute(HTTPMethod.PUT, "/test/1", TestWebService.TestRequest.class, request, void.class);
     }
 
     @Test
     void patch() {
-        when(webServiceClient.serviceURL(startsWith("/test/:id"), eq(Maps.newHashMap("id", 1))))
-                .thenReturn("http://localhost/test/1");
-
         TestWebService.TestRequest request = new TestWebService.TestRequest();
         client.patch(1, request);
 
-        verify(webServiceClient).execute(HTTPMethod.PATCH, "http://localhost/test/1", TestWebService.TestRequest.class, request, void.class);
+        verify(webServiceClient).execute(HTTPMethod.PATCH, "/test/1", TestWebService.TestRequest.class, request, void.class);
+    }
+
+    @Test
+    void buildPath() {
+        var builder = new CodeBuilder();
+        this.builder.buildPath(builder, "/test", Map.of());
+        assertThat(builder.build()).isEqualToIgnoringWhitespace("String path = \"/test\";");
+
+        builder = new CodeBuilder();
+        this.builder.buildPath(builder, "/test/:id", Map.of("id", 0));
+        assertThat(builder.build()).contains("builder.append(\"/test/\").append(core.framework.impl.web.service.PathParamHelper.toString(param0));");
+
+        builder = new CodeBuilder();
+        this.builder.buildPath(builder, "/:id/status", Map.of("id", 0));
+        assertThat(builder.build())
+                .contains("builder.append(\"/\").append(core.framework.impl.web.service.PathParamHelper.toString(param0));")
+                .contains("builder.append(\"/status\");");
+
+        builder = new CodeBuilder();
+        this.builder.buildPath(builder, "/test/:key1/:key2", Map.of("key1", 0, "key2", 1));
+        assertThat(builder.build())
+                .contains("builder.append(\"/test/\").append(core.framework.impl.web.service.PathParamHelper.toString(param0));")
+                .contains("builder.append(\"/\").append(core.framework.impl.web.service.PathParamHelper.toString(param1));");
+
+        builder = new CodeBuilder();
+        this.builder.buildPath(builder, "/test/:key1/:key2/", Map.of("key1", 0, "key2", 1));
+        assertThat(builder.build())
+                .contains("builder.append(\"/test/\").append(core.framework.impl.web.service.PathParamHelper.toString(param0));")
+                .contains("builder.append(\"/\").append(core.framework.impl.web.service.PathParamHelper.toString(param1));")
+                .contains("builder.append(\"/\");");
     }
 }

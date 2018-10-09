@@ -1,14 +1,13 @@
 package core.framework.impl.db;
 
 import core.framework.db.Database;
+import core.framework.db.IsolationLevel;
 import core.framework.db.Repository;
 import core.framework.db.Transaction;
 import core.framework.db.UncheckedSQLException;
 import core.framework.impl.resource.Pool;
 import core.framework.log.ActionLogContext;
 import core.framework.log.Markers;
-import core.framework.util.Exceptions;
-import core.framework.util.Maps;
 import core.framework.util.StopWatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,10 +20,14 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -34,12 +37,13 @@ public final class DatabaseImpl implements Database {
     public final DatabaseOperation operation;
 
     private final Logger logger = LoggerFactory.getLogger(DatabaseImpl.class);
-    private final Map<Class<?>, RowMapper<?>> rowMappers = Maps.newHashMap();
+    private final Map<Class<?>, RowMapper<?>> rowMappers = new HashMap<>(32);
     public String user;
     public String password;
     public Vendor vendor;
     public int tooManyRowsReturnedThreshold = 1000;
     public long slowOperationThresholdInNanos = Duration.ofSeconds(5).toNanos();
+    public IsolationLevel isolationLevel;
     private String url;
     private Properties driverProperties;
     private Duration timeout;
@@ -76,24 +80,27 @@ public final class DatabaseImpl implements Database {
             this.driverProperties = driverProperties;
         }
         try {
-            return driver.connect(url, driverProperties);
+            Connection connection = driver.connect(url, driverProperties);
+            if (isolationLevel != null) connection.setTransactionIsolation(isolationLevel.level);
+            return connection;
         } catch (SQLException e) {
             throw new UncheckedSQLException(e);
         }
     }
 
     private Properties driverProperties() {
-        Properties properties = new Properties();
-        if (user != null) properties.put("user", user);
-        if (password != null) properties.put("password", password);
+        var properties = new Properties();
+        if (user != null) properties.setProperty("user", user);
+        if (password != null) properties.setProperty("password", password);
         String timeoutValue = String.valueOf(timeout.toMillis());
         if (url.startsWith("jdbc:mysql:")) {
-            properties.put("connectTimeout", timeoutValue);
-            properties.put("socketTimeout", timeoutValue);
-            properties.put("rewriteBatchedStatements", "true");     // refer to https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+            properties.setProperty("connectTimeout", timeoutValue);
+            properties.setProperty("socketTimeout", timeoutValue);
+            properties.setProperty("rewriteBatchedStatements", "true");     // refer to https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html
+            properties.setProperty("useSSL", "false");                      // mysql with ssl has overhead, usually we ensure security on arch level, e.g. gcloud sql proxy or firewall rule
         } else if (url.startsWith("jdbc:oracle:")) {
-            properties.put("oracle.net.CONNECT_TIMEOUT", timeoutValue);
-            properties.put("oracle.jdbc.ReadTimeout", timeoutValue);
+            properties.setProperty("oracle.net.CONNECT_TIMEOUT", timeoutValue);
+            properties.setProperty("oracle.jdbc.ReadTimeout", timeoutValue);
         }
         return properties;
     }
@@ -110,7 +117,7 @@ public final class DatabaseImpl implements Database {
     }
 
     public void url(String url) {
-        if (!url.startsWith("jdbc:")) throw Exceptions.error("jdbc url must start with \"jdbc:\", url={}", url);
+        if (!url.startsWith("jdbc:")) throw new Error(format("jdbc url must start with \"jdbc:\", url={}", url));
         logger.info("set database connection url, url={}", url);
         this.url = url;
         driver = driver(url);
@@ -124,7 +131,7 @@ public final class DatabaseImpl implements Database {
         } else if (url.startsWith("jdbc:hsqldb:")) {
             return createDriver("org.hsqldb.jdbc.JDBCDriver");
         } else {
-            throw Exceptions.error("not supported database, url={}", url);
+            throw new Error(format("not supported database, url={}", url));
         }
     }
 
@@ -137,23 +144,23 @@ public final class DatabaseImpl implements Database {
     }
 
     public <T> void view(Class<T> viewClass) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             new DatabaseClassValidator(viewClass).validateViewClass();
             registerViewClass(viewClass);
         } finally {
-            logger.info("register db view, viewClass={}, elapsedTime={}", viewClass.getCanonicalName(), watch.elapsedTime());
+            logger.info("register db view, viewClass={}, elapsed={}", viewClass.getCanonicalName(), watch.elapsed());
         }
     }
 
     public <T> Repository<T> repository(Class<T> entityClass) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             new DatabaseClassValidator(entityClass).validateEntityClass();
             registerViewClass(entityClass);
             return new RepositoryImpl<>(this, entityClass);
         } finally {
-            logger.info("register db entity, entityClass={}, elapsedTime={}", entityClass.getCanonicalName(), watch.elapsedTime());
+            logger.info("register db entity, entityClass={}, elapsed={}", entityClass.getCanonicalName(), watch.elapsed());
         }
     }
 
@@ -164,7 +171,7 @@ public final class DatabaseImpl implements Database {
 
     @Override
     public <T> List<T> select(String sql, Class<T> viewClass, Object... params) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         int returnedRows = 0;
         try {
             List<T> results = operation.select(sql, rowMapper(viewClass), params);
@@ -172,41 +179,57 @@ public final class DatabaseImpl implements Database {
             checkTooManyRowsReturned(returnedRows);
             return results;
         } finally {
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("db", elapsedTime, returnedRows, 0);
-            logger.debug("select, sql={}, params={}, returnedRows={}, elapsedTime={}", sql, new SQLParams(operation.enumMapper, params), returnedRows, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("db", elapsed, returnedRows, 0);
+            logger.debug("select, sql={}, params={}, returnedRows={}, elapsed={}", sql, new SQLParams(operation.enumMapper, params), returnedRows, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
     public <T> Optional<T> selectOne(String sql, Class<T> viewClass, Object... params) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         int returnedRows = 0;
         try {
             Optional<T> result = operation.selectOne(sql, rowMapper(viewClass), params);
             if (result.isPresent()) returnedRows = 1;
             return result;
         } finally {
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("db", elapsedTime, returnedRows, 0);
-            logger.debug("selectOne, sql={}, params={}, returnedRows={}, elapsedTime={}", sql, new SQLParams(operation.enumMapper, params), returnedRows, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("db", elapsed, returnedRows, 0);
+            logger.debug("selectOne, sql={}, params={}, returnedRows={}, elapsed={}", sql, new SQLParams(operation.enumMapper, params), returnedRows, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
     @Override
     public int execute(String sql, Object... params) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         int updatedRows = 0;
         try {
             updatedRows = operation.update(sql, params);
             return updatedRows;
         } finally {
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("db", elapsedTime, 0, updatedRows);
-            logger.debug("execute, sql={}, params={}, updatedRows={}, elapsedTime={}", sql, new SQLParams(operation.enumMapper, params), updatedRows, elapsedTime);
-            checkSlowOperation(elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("db", elapsed, 0, updatedRows);
+            logger.debug("execute, sql={}, params={}, updatedRows={}, elapsed={}", sql, new SQLParams(operation.enumMapper, params), updatedRows, elapsed);
+            checkSlowOperation(elapsed);
+        }
+    }
+
+    @Override
+    public int[] batchExecute(String sql, List<Object[]> params) {
+        StopWatch watch = new StopWatch();
+        int updatedRows = 0;
+        try {
+            int[] results = operation.batchUpdate(sql, params);
+            updatedRows = Arrays.stream(results).sum();
+            return results;
+        } finally {
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("db", elapsed, 0, updatedRows);
+            logger.debug("batchExecute, sql={}, params={}, size={}, updatedRows={}, elapsed={}", sql, new SQLBatchParams(operation.enumMapper, params), params.size(), updatedRows, elapsed);
+            checkSlowOperation(elapsed);
         }
     }
 
@@ -214,13 +237,13 @@ public final class DatabaseImpl implements Database {
         @SuppressWarnings("unchecked")
         RowMapper<T> mapper = (RowMapper<T>) rowMappers.get(viewClass);
         if (mapper == null)
-            throw Exceptions.error("view class is not registered, please register in module by db().view(), viewClass={}", viewClass.getCanonicalName());
+            throw new Error(format("view class is not registered, please register in module by db().view(), viewClass={}", viewClass.getCanonicalName()));
         return mapper;
     }
 
     private <T> void registerViewClass(Class<T> viewClass) {
         if (rowMappers.containsKey(viewClass)) {
-            throw Exceptions.error("found duplicate view class, viewClass={}", viewClass.getCanonicalName());
+            throw new Error(format("found duplicate view class, viewClass={}", viewClass.getCanonicalName()));
         }
         RowMapper<T> mapper = new RowMapperBuilder<>(viewClass, operation.enumMapper).build();
         rowMappers.put(viewClass, mapper);
@@ -232,9 +255,9 @@ public final class DatabaseImpl implements Database {
         }
     }
 
-    private void checkSlowOperation(long elapsedTime) {
-        if (elapsedTime > slowOperationThresholdInNanos) {
-            logger.warn(Markers.errorCode("SLOW_DB"), "slow db operation, elapsedTime={}", elapsedTime);
+    private void checkSlowOperation(long elapsed) {
+        if (elapsed > slowOperationThresholdInNanos) {
+            logger.warn(Markers.errorCode("SLOW_DB"), "slow db operation, elapsed={}", elapsed);
         }
     }
 }

@@ -9,15 +9,14 @@ import io.undertow.util.Headers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * @author neo
@@ -38,9 +37,16 @@ class RequestParserTest {
     }
 
     @Test
+    void scheme() {
+        assertThat(parser.scheme("http", "https")).isEqualTo("https");
+        assertThat(parser.scheme("http", null)).isEqualTo("http");
+    }
+
+    @Test
     void requestPort() {
         assertThat(parser.requestPort("127.0.0.1", "https", null)).isEqualTo(443);
         assertThat(parser.requestPort("127.0.0.1:8080", "http", null)).isEqualTo(8080);
+        assertThat(parser.requestPort("[::1]:8080", "http", null)).isEqualTo(8080);
     }
 
     @Test
@@ -51,16 +57,13 @@ class RequestParserTest {
     }
 
     @Test
-    void parseQueryParams() throws UnsupportedEncodingException {
+    void parseQueryParams() {
         var request = new RequestImpl(null, null);
-        Map<String, Deque<String>> params = new HashMap<>();
-        params.computeIfAbsent("key", key -> new ArrayDeque<>()).add(URLEncoder.encode("value1 value2", "UTF-8"));     // undertow url decoding is disabled in core.framework.impl.web.HTTPServer.start, so the parser must decode all query param
-        params.computeIfAbsent("emptyKey", key -> new ArrayDeque<>()).add("");  // for use case: http://address?emptyKey=
+        Map<String, Deque<String>> params = Map.of("key", new ArrayDeque<>(List.of("value")),
+                "emptyKey", new ArrayDeque<>(List.of("")));  // for use case: http://address?emptyKey=
         parser.parseQueryParams(request, params);
 
-        assertThat(request.queryParam("key")).hasValue("value1 value2");
-        assertThat(request.queryParam("notExistedKey")).isNotPresent();
-        assertThat(request.queryParam("emptyKey")).get().isEqualTo("");
+        assertThat(request.queryParams()).containsOnly(entry("key", "value"), entry("emptyKey", ""));
     }
 
     @Test
@@ -106,5 +109,18 @@ class RequestParserTest {
         assertThatThrownBy(() -> parser.requestURL(request, exchange))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("requestURL is too long");
+    }
+
+    @Test
+    void path() {
+        var exchange = new HttpServerExchange(null);
+        exchange.setRequestURI("http://localhost:8080/path/%25", true);
+        assertThat(parser.path(exchange)).isEqualTo("/path/%25");
+
+        exchange.setRequestURI("/path/%25", true);
+        assertThat(parser.path(exchange)).isEqualTo("/path/%25");
+
+        exchange.setRequestURI("/path/%25", false);
+        assertThat(parser.path(exchange)).isEqualTo("/path/%25");
     }
 }

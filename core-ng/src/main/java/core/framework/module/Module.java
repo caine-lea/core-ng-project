@@ -4,7 +4,6 @@ import core.framework.async.Task;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.impl.module.ShutdownHook;
-import core.framework.util.Exceptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,12 +52,13 @@ public abstract class Module {
         return instance;
     }
 
-    public <T> T bean(Type instanceType, String name) {
-        return context.beanFactory.bean(instanceType, name);
+    @SuppressWarnings("unchecked")
+    public <T> T bean(Class<T> instanceClass) {
+        return (T) bean(instanceClass, null);
     }
 
-    public <T> T bean(Class<T> instanceType) {
-        return bean(instanceType, null);
+    public Object bean(Type type, String name) {
+        return context.beanFactory.bean(type, name);
     }
 
     public void loadProperties(String classpath) {
@@ -71,7 +71,7 @@ public abstract class Module {
     }
 
     public String requiredProperty(String key) {
-        return property(key).orElseThrow(() -> Exceptions.error("property key not found, key={}", key));
+        return property(key).orElseThrow(() -> new Error("property key not found, key=" + key));
     }
 
     public LogConfig log() {
@@ -82,8 +82,8 @@ public abstract class Module {
         return context.config(HTTPConfig.class, null);
     }
 
-    public RouteConfig route() {
-        return new RouteConfig(context);
+    public WebSocketConfig ws() {
+        return new WebSocketConfig(context);
     }
 
     public SiteConfig site() {

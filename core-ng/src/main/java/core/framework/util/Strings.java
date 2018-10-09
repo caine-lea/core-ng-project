@@ -4,12 +4,14 @@ import org.slf4j.helpers.MessageFormatter;
 
 import java.util.List;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 /**
  * @author neo
  */
 public final class Strings {
     public static byte[] bytes(String text) {
-        return text.getBytes(Charsets.UTF_8);
+        return text.getBytes(UTF_8);
     }
 
     public static String format(String pattern, Object... params) {
@@ -23,12 +25,8 @@ public final class Strings {
         return text1.compareTo(text2);
     }
 
-    public static boolean isEmpty(String text) {
-        if (text == null) return true;
-        for (int i = 0; i < text.length(); i++) {
-            if (!Character.isWhitespace(text.charAt(i))) return false;
-        }
-        return true;
+    public static boolean isBlank(String text) {
+        return text == null || text.isBlank();
     }
 
     public static boolean equals(String text1, String text2) {
@@ -42,9 +40,9 @@ public final class Strings {
         return text.substring(0, maxLength);
     }
 
-    public static String trim(String text) {
+    public static String strip(String text) {
         if (text == null) return null;
-        return text.trim();
+        return text.strip();
     }
 
     public static boolean startsWith(String text, char prefix) {

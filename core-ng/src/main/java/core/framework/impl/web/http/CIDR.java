@@ -1,7 +1,5 @@
 package core.framework.impl.web.http;
 
-import core.framework.util.Exceptions;
-
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
@@ -27,7 +25,7 @@ class CIDR {
     CIDR(String cidr) {
         this.cidr = cidr;
         int index = cidr.indexOf('/');
-        if (index <= 0 || index >= cidr.length() - 1) throw Exceptions.error("invalid cidr, value={}", cidr);
+        if (index <= 0 || index >= cidr.length() - 1) throw new Error("invalid cidr, value=" + cidr);
         address = address(cidr.substring(0, index));
         int maskBits = Integer.parseInt(cidr.substring(index + 1));
         this.mask = mask(maskBits);

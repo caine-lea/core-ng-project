@@ -1,8 +1,7 @@
 package core.framework.impl.web.bean;
 
-import core.framework.impl.web.request.URLParamParser;
+import core.framework.impl.web.service.PathParamHelper;
 import core.framework.json.JSON;
-import core.framework.util.Strings;
 import core.framework.web.exception.BadRequestException;
 
 import java.math.BigDecimal;
@@ -46,68 +45,78 @@ final class QueryParamMapperHelper {   // used by generated QueryParamMapper
         return JSON.toEnumValue(enumValue);
     }
 
+    // deserialization helpers
+    public static String toString(String value) {
+        if (value.isEmpty()) return null;
+        return value;
+    }
+
     public static Integer toInt(String value) {
-        if (Strings.isEmpty(value)) return null;
-        return URLParamParser.toInt(value);
+        if (value.isEmpty()) return null;
+        return PathParamHelper.toInt(value);
     }
 
     public static Long toLong(String value) {
-        if (Strings.isEmpty(value)) return null;
-        return URLParamParser.toLong(value);
+        if (value.isEmpty()) return null;
+        return PathParamHelper.toLong(value);
     }
 
     public static Double toDouble(String value) {
-        if (Strings.isEmpty(value)) return null;
+        if (value.isEmpty()) return null;
         try {
-            return Double.parseDouble(value);
+            return Double.valueOf(value);
         } catch (NumberFormatException e) {
-            throw new BadRequestException(Strings.format("failed to parse double, value={}", value), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException("failed to parse double, value=" + value, "INVALID_HTTP_REQUEST", e);
         }
     }
 
     public static BigDecimal toBigDecimal(String value) {
-        if (Strings.isEmpty(value)) return null;
+        if (value.isEmpty()) return null;
         try {
             return new BigDecimal(value);
         } catch (NumberFormatException e) {
-            throw new BadRequestException(Strings.format("failed to parse big decimal, value={}", value), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException("failed to parse big decimal, value=" + value, "INVALID_HTTP_REQUEST", e);
         }
     }
 
     public static Boolean toBoolean(String value) {
-        if (Strings.isEmpty(value)) return null;
-        return URLParamParser.toBoolean(value);
+        if (value.isEmpty()) return null;
+        try {
+            return Boolean.valueOf(value);
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("failed to parse boolean, value=" + value, "INVALID_HTTP_REQUEST", e);
+        }
     }
 
     public static <T extends Enum<?>> T toEnum(String value, Class<T> valueClass) {
-        if (Strings.isEmpty(value)) return null;
-        return URLParamParser.toEnum(value, valueClass);
+        if (value.isEmpty()) return null;
+        return PathParamHelper.toEnum(value, valueClass);
     }
 
     public static ZonedDateTime toZonedDateTime(String value) {
-        if (Strings.isEmpty(value)) return null;
+        if (value.isEmpty()) return null;
         try {
             return ZonedDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
         } catch (DateTimeParseException e) {
-            throw new BadRequestException(Strings.format("failed to parse zoned date time, value={}", value), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException("failed to parse zoned date time, value=" + value, "INVALID_HTTP_REQUEST", e);
         }
     }
 
     public static LocalDateTime toDateTime(String value) {
-        if (Strings.isEmpty(value)) return null;
+        if (value.isEmpty()) return null;
         try {
             return LocalDateTime.parse(value, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         } catch (DateTimeParseException e) {
-            throw new BadRequestException(Strings.format("failed to parse local date time, value={}", value), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException("failed to parse local date time, value=" + value, "INVALID_HTTP_REQUEST", e);
         }
     }
 
     public static LocalDate toDate(String value) {
-        if (Strings.isEmpty(value)) return null;
+        if (value.isEmpty()) return null;
         try {
             return LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE);
         } catch (DateTimeParseException e) {
-            throw new BadRequestException(Strings.format("failed to parse local date, value={}", value), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException("failed to parse local date, value=" + value, "INVALID_HTTP_REQUEST", e);
         }
     }
 }

@@ -1,8 +1,8 @@
 package core.framework.impl.template.expression;
 
-import core.framework.util.Exceptions;
-
 import java.util.regex.Pattern;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -17,7 +17,7 @@ class ExpressionParser {
         char firstChar = expression.charAt(0);
         if (firstChar == '"' || firstChar == '\'') {
             if (length <= 1 || expression.charAt(length - 1) != firstChar)
-                throw Exceptions.error("\" or \' is not closed, expression={}", expression);
+                throw new Error("\" or \' is not closed, expression=" + expression);
             return new ValueToken("\"" + expression.substring(1, length - 1) + "\"", String.class);
         }
 
@@ -33,11 +33,11 @@ class ExpressionParser {
                 if (NUMBER_PATTERN.matcher(field).matches()) continue;
 
                 if (!FIELD_PATTERN.matcher(field).matches())
-                    throw Exceptions.error("invalid field name, field={}", field);
-                FieldToken token = new FieldToken(field);
+                    throw new Error("invalid field name, field=" + field);
+                var token = new FieldToken(field);
                 token.next = parse(expression.substring(i + 1));
                 if (token.next instanceof ValueToken)
-                    throw new Error("value token must not follow '.'");
+                    throw new Error("value token must not be followed by '.', expression=" + expression);
                 return token;
             }
         }
@@ -46,7 +46,7 @@ class ExpressionParser {
             return new ValueToken(expression, Number.class);
         } else {
             if (!FIELD_PATTERN.matcher(expression).matches())
-                throw Exceptions.error("invalid field name, field={}", expression);
+                throw new Error(format("invalid field name, field={}", expression));
             return new FieldToken(expression);
         }
     }
@@ -54,33 +54,32 @@ class ExpressionParser {
     private Token parseMethod(String expression, int leftParenthesesIndex) {
         int length = expression.length();
         String method = expression.substring(0, leftParenthesesIndex);
-        if (!METHOD_PATTERN.matcher(method).matches())
-            throw Exceptions.error("invalid method name, method={}", method);
+        if (!METHOD_PATTERN.matcher(method).matches()) throw new Error("invalid method name, method=" + method);
 
         MethodToken token = new MethodToken(method);
         int endIndex = findMethodEnd(expression, leftParenthesesIndex + 1);
         parseMethodParams(token, expression.substring(leftParenthesesIndex + 1, endIndex));
-        if (endIndex < length - 1) {
-            if (endIndex + 1 >= length)
-                throw new Error("method can only be followed by field or method");
+        if (endIndex + 1 < length) {
             if (expression.charAt(endIndex + 1) != '.')
-                throw new Error("method can only be followed by '.'");
-
+                throw new Error("method can only be followed by '.', expression=" + expression);
+            if (endIndex + 2 == length)
+                throw new Error("method can only be followed by field or method, expression=" + expression);
             token.next = parse(expression.substring(endIndex + 2));
             if (token.next instanceof ValueToken)
-                throw new Error("value token must not be followed by '.'");
+                throw new Error("value token must not be followed by '.', expression=" + expression);
         }
         return token;
     }
 
     private void parseMethodParams(MethodToken token, String params) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < params.length(); i++) {
+        var builder = new StringBuilder();
+        int length = params.length();
+        for (int i = 0; i < length; i++) {
             char ch = params.charAt(i);
             if (ch == ',') {
                 String param = builder.toString().trim();
-                if (param.length() == 0)
-                    throw Exceptions.error("expect param before ',', method={}", token.name);
+                if (param.isEmpty())
+                    throw new Error("expect param before ',', method=" + token.name);
                 token.params.add(parse(param));
                 builder = new StringBuilder();
             } else {
@@ -94,7 +93,8 @@ class ExpressionParser {
 
     private int findMethodEnd(String expression, int index) {
         int leftParentheses = 0;
-        for (int i = index; i < expression.length(); i++) {
+        int length = expression.length();
+        for (int i = index; i < length; i++) {
             char ch = expression.charAt(i);
             if (ch == ')') {
                 if (leftParentheses == 0) return i;

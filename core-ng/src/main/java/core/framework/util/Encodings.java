@@ -1,7 +1,10 @@
 package core.framework.util;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.BitSet;
+
+import static java.nio.charset.StandardCharsets.US_ASCII;
 
 /**
  * @author neo
@@ -89,7 +92,7 @@ public final class Encodings {
             }
             position++;
         }
-        return new String(buffer, 0, position, Charsets.UTF_8);
+        return new String(buffer, 0, position, StandardCharsets.UTF_8);
     }
 
     public static String base64(String value) {
@@ -110,5 +113,15 @@ public final class Encodings {
 
     public static byte[] decodeBase64URLSafe(String value) {
         return Base64.getUrlDecoder().decode(value);
+    }
+
+    public static String hex(byte[] bytes) {
+        var values = new byte[bytes.length * 2];
+        int i = 0;
+        for (byte value : bytes) {
+            values[i++] = (byte) HEX_CHARS[value >> 4 & 0xF];
+            values[i++] = (byte) HEX_CHARS[value & 0xF];
+        }
+        return new String(values, US_ASCII);
     }
 }

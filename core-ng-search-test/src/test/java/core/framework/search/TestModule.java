@@ -15,10 +15,11 @@ public class TestModule extends AbstractTestModule {
     protected void initialize() {
         SearchConfig search = config(SearchConfig.class);
         search.host("localhost");
+        search.timeout(Duration.ofSeconds(5));
         search.slowOperationThreshold(Duration.ofSeconds(5));
-        search.timeout(Duration.ofSeconds(10));
         search.type(TestDocument.class);
 
         config(InitSearchConfig.class).createIndex("document", "search-test/document-index.json");
+        config(InitSearchConfig.class).createIndexTemplate("document", "search-test/document-index-template.json");
     }
 }

@@ -7,7 +7,6 @@ import com.mongodb.client.MongoDatabase;
 import core.framework.mongo.Collection;
 import core.framework.mongo.Mongo;
 import core.framework.mongo.MongoCollection;
-import core.framework.util.Exceptions;
 import core.framework.util.StopWatch;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
@@ -15,6 +14,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -40,7 +41,7 @@ public class MongoImpl implements Mongo {
 
     MongoDatabase createDatabase(CodecRegistry registry) {
         if (uri == null) throw new Error("uri must not be null");
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             builder.connectTimeout(timeoutInMs);
             builder.socketTimeout(timeoutInMs);
@@ -50,7 +51,7 @@ public class MongoImpl implements Mongo {
             mongoClient = new MongoClient(uri);
             return mongoClient.getDatabase(uri.getDatabase());
         } finally {
-            logger.info("create mongo client, uri={}, elapsedTime={}", uri, watch.elapsedTime());
+            logger.info("create mongo client, uri={}, elapsed={}", uri, watch.elapsed());
         }
     }
 
@@ -64,17 +65,17 @@ public class MongoImpl implements Mongo {
 
     @Override
     public void dropCollection(String collection) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             database().getCollection(collection).drop();
         } finally {
-            logger.info("dropCollection, collection={}, elapsedTime={}", collection, watch.elapsedTime());
+            logger.info("dropCollection, collection={}, elapsed={}", collection, watch.elapsed());
         }
     }
 
     public void uri(String uri) {
         this.uri = new MongoClientURI(uri, builder);
-        if (this.uri.getDatabase() == null) throw Exceptions.error("uri must have database, uri={}", uri);
+        if (this.uri.getDatabase() == null) throw new Error(format("uri must have database, uri={}", uri));
     }
 
     public void poolSize(int minSize, int maxSize) {
@@ -87,23 +88,23 @@ public class MongoImpl implements Mongo {
     }
 
     public <T> MongoCollection<T> collection(Class<T> entityClass) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             new MongoClassValidator(entityClass).validateEntityClass();
             codecs.registerEntity(entityClass);
             return new MongoCollectionImpl<>(this, entityClass);
         } finally {
-            logger.info("register mongo entity, entityClass={}, elapsedTime={}", entityClass.getCanonicalName(), watch.elapsedTime());
+            logger.info("register mongo entity, entityClass={}, elapsed={}", entityClass.getCanonicalName(), watch.elapsed());
         }
     }
 
     public <T> void view(Class<T> viewClass) {
-        StopWatch watch = new StopWatch();
+        var watch = new StopWatch();
         try {
             new MongoClassValidator(viewClass).validateViewClass();
             codecs.registerView(viewClass);
         } finally {
-            logger.info("register mongo view, viewClass={}, elapsedTime={}", viewClass.getCanonicalName(), watch.elapsedTime());
+            logger.info("register mongo view, viewClass={}, elapsed={}", viewClass.getCanonicalName(), watch.elapsed());
         }
     }
 

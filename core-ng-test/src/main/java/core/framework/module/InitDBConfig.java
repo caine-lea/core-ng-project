@@ -4,9 +4,7 @@ import core.framework.db.Repository;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
 import core.framework.test.db.EntitySchemaGenerator;
-import core.framework.test.db.SQLScriptRunner;
 import core.framework.test.module.TestModuleContext;
-import core.framework.util.ClasspathResources;
 import core.framework.util.Types;
 
 import java.util.List;
@@ -26,14 +24,6 @@ public final class InitDBConfig extends Config {
         config = this.context.getConfig(DBConfig.class, name);
     }
 
-    @Override
-    protected void validate() {
-    }
-
-    public void runScript(String scriptPath) {
-        new SQLScriptRunner(config.database, ClasspathResources.text(scriptPath)).run();
-    }
-
     public void createSchema() {
         List<Class<?>> entityClasses = config.entityClasses;
         for (Class<?> entityClass : entityClasses) {
@@ -41,7 +31,8 @@ public final class InitDBConfig extends Config {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public <T> Repository<T> repository(Class<T> entityClass) {
-        return context.beanFactory.bean(Types.generic(Repository.class, entityClass), name);
+        return (Repository<T>) context.beanFactory.bean(Types.generic(Repository.class, entityClass), name);
     }
 }

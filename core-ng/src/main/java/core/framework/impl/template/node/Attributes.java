@@ -2,12 +2,13 @@ package core.framework.impl.template.node;
 
 import core.framework.impl.template.TemplateMetaContext;
 import core.framework.impl.template.fragment.ContainerFragment;
-import core.framework.util.Exceptions;
 import core.framework.util.Maps;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -19,7 +20,7 @@ public class Attributes {
         attributes.put(attribute.name, attribute);
     }
 
-    public void buildTemplate(ContainerFragment parent, TemplateMetaContext context) {
+    void buildTemplate(ContainerFragment parent, TemplateMetaContext context) {
         validate();
 
         for (Attribute attribute : attributes.values()) {
@@ -53,14 +54,14 @@ public class Attributes {
         return !attribute.isDynamic() && (attributes.containsKey("c:" + name) || attributes.containsKey("m:" + name));   // there is dynamic attribute to overwrite
     }
 
-    public boolean containDynamicContent() {
+    boolean containDynamicContent() {
         return attributes.containsKey("c:text")
             || attributes.containsKey("m:text")
             || attributes.containsKey("c:html")
             || attributes.containsKey("c:include");
     }
 
-    public Attribute dynamicContentAttribute() {
+    Attribute dynamicContentAttribute() {
         Attribute attribute = attributes.get("c:text");
         if (attribute != null) return attribute;
         attribute = attributes.get("m:text");
@@ -70,7 +71,7 @@ public class Attributes {
         return attributes.get("c:include");
     }
 
-    public List<Attribute> flowAttributes() {
+    List<Attribute> flowAttributes() {
         List<Attribute> attributes = new ArrayList<>();
         this.attributes.forEach((name, attr) -> {
             if ("c:if".equals(name) || "c:for".equals(name)) attributes.add(attr);
@@ -91,6 +92,6 @@ public class Attributes {
         if (attribute != null) count++;
 
         if (count > 1 && attribute != null)
-            throw Exceptions.error("element must not have more than one dynamic content attribute, attribute={}, location={}", attribute.name, attribute.location);
+            throw new Error(format("element must not have more than one dynamic content attribute, attribute={}, location={}", attribute.name, attribute.location));
     }
 }

@@ -17,13 +17,15 @@ public class PropertyManager {
 
     public Optional<String> property(String key) {
         String envVarName = envVarName(key);
-        String value = System.getenv(envVarName);  // use env var to override property, e.g. under docker/kubenetes, SYS_HTTP_PORT to override sys.http.port
-        if (!Strings.isEmpty(value)) {
+        // use env var to override property, e.g. under docker/kubenetes, SYS_HTTP_PORT to override sys.http.port
+        // in kube env, ConfigMap can be bound as env variables
+        String value = System.getenv(envVarName);
+        if (!Strings.isBlank(value)) {
             logger.info("found overridden property by env var {}, key={}, value={}", envVarName, key, maskValue(key, value));
             return Optional.of(value);
         }
         value = System.getProperty(key);     // use system property to override property, e.g. -Dsys.http.port=8080
-        if (!Strings.isEmpty(value)) {
+        if (!Strings.isBlank(value)) {
             logger.info("found overridden property by system property -D{}, key={}, value={}", key, key, maskValue(key, value));
             return Optional.of(value);
         }
@@ -36,8 +38,9 @@ public class PropertyManager {
     }
 
     String envVarName(String propertyKey) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < propertyKey.length(); i++) {
+        var builder = new StringBuilder();
+        int length = propertyKey.length();
+        for (int i = 0; i < length; i++) {
             char ch = propertyKey.charAt(i);
             if (ch == '.') builder.append('_');
             else builder.append(ASCII.toUpperCase(ch));

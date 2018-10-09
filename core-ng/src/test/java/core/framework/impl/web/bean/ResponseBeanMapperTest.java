@@ -1,14 +1,14 @@
 package core.framework.impl.web.bean;
 
+import core.framework.impl.json.JSONWriter;
 import core.framework.impl.validate.ValidationException;
-import core.framework.json.JSON;
-import core.framework.util.Charsets;
 import core.framework.util.Lists;
 import core.framework.util.Strings;
 import core.framework.util.Types;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,10 +20,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class ResponseBeanMapperTest {
     private ResponseBeanMapper responseBeanMapper;
+    private JSONWriter<TestBean> writer;
 
     @BeforeEach
     void createResponseBeanMapper() {
-        responseBeanMapper = new ResponseBeanMapper(new BeanClassNameValidator());
+        responseBeanMapper = new ResponseBeanMapper(new BeanMapperRegistry());
+        writer = JSONWriter.of(TestBean.class);
     }
 
     @Test
@@ -35,14 +37,14 @@ class ResponseBeanMapperTest {
     }
 
     @Test
-    void toJSONWithEmptyOptional() {
+    void testToJSONWithEmptyOptional() {
         Optional<TestBean> optional = Optional.empty();
         byte[] bytes = responseBeanMapper.toJSON(optional);
-        assertThat(new String(bytes, Charsets.UTF_8)).isEqualTo("null");
+        assertThat(new String(bytes, StandardCharsets.UTF_8)).isEqualTo("null");
     }
 
     @Test
-    void toJSONWithOptional() {
+    void testToJSONWithOptional() {
         TestBean bean = new TestBean();
         bean.intField = 5;
         Optional<TestBean> optional = Optional.of(bean);
@@ -51,7 +53,7 @@ class ResponseBeanMapperTest {
     }
 
     @Test
-    void toJSONWithValidationError() {
+    void testToJSONWithValidationError() {
         assertThatThrownBy(() -> responseBeanMapper.toJSON(new TestBean()))
                 .isInstanceOf(ValidationException.class);
     }
@@ -63,27 +65,41 @@ class ResponseBeanMapperTest {
 
     @Test
     void fromJSONWithEmptyOptional() {
-        Optional<TestBean> parsedBean = responseBeanMapper.fromJSON(Types.optional(TestBean.class), Strings.bytes("null"));
+        @SuppressWarnings("unchecked")
+        var parsedBean = (Optional<TestBean>) responseBeanMapper.fromJSON(Types.optional(TestBean.class), Strings.bytes("null"));
         assertThat(parsedBean).isNotPresent();
     }
 
     @Test
     void fromJSONWithOptional() {
-        TestBean bean = new TestBean();
+        var bean = new TestBean();
         bean.intField = 3;
-        String json = JSON.toJSON(bean);
 
-        Optional<TestBean> parsedBean = responseBeanMapper.fromJSON(Types.optional(TestBean.class), Strings.bytes(json));
+        @SuppressWarnings("unchecked")
+        var parsedBean = (Optional<TestBean>) responseBeanMapper.fromJSON(Types.optional(TestBean.class), writer.toJSON(bean));
         assertThat(parsedBean).get().isEqualToComparingFieldByField(bean);
+    }
+
+    @Test
+    void fromJSONWithValidationError() {
+        var bean = new TestBean();
+
+        assertThatThrownBy(() -> responseBeanMapper.fromJSON(TestBean.class, writer.toJSON(bean)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("int_field");
+    }
+
+    @Test
+    void fromJSONWithVoid() {
+        assertThat(responseBeanMapper.fromJSON(void.class, null)).isNull();
     }
 
     @Test
     void fromJSON() {
         TestBean bean = new TestBean();
         bean.intField = 3;
-        String json = JSON.toJSON(bean);
 
-        TestBean parsedBean = responseBeanMapper.fromJSON(TestBean.class, Strings.bytes(json));
+        TestBean parsedBean = (TestBean) responseBeanMapper.fromJSON(TestBean.class, writer.toJSON(bean));
         assertThat(parsedBean).isEqualToComparingFieldByField(bean);
     }
 }

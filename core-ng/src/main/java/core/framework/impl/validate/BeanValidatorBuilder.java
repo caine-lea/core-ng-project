@@ -3,7 +3,7 @@ package core.framework.impl.validate;
 import core.framework.api.validate.Length;
 import core.framework.api.validate.Max;
 import core.framework.api.validate.Min;
-import core.framework.api.validate.NotEmpty;
+import core.framework.api.validate.NotBlank;
 import core.framework.api.validate.NotNull;
 import core.framework.api.validate.Pattern;
 import core.framework.api.validate.Size;
@@ -12,12 +12,9 @@ import core.framework.impl.asm.DynamicInstanceBuilder;
 import core.framework.impl.reflect.Classes;
 import core.framework.impl.reflect.Fields;
 import core.framework.impl.reflect.GenericTypes;
-import core.framework.util.Exceptions;
-import core.framework.util.Strings;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Type;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,6 +25,7 @@ import java.util.regex.PatternSyntaxException;
 
 import static core.framework.impl.asm.Literal.type;
 import static core.framework.impl.asm.Literal.variable;
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -44,11 +42,10 @@ public class BeanValidatorBuilder {
     }
 
     public Optional<BeanValidator> build() {
+        validate(beanClass);
         if (Classes.instanceFields(beanClass).stream().noneMatch(this::hasValidationAnnotation)) return Optional.empty();
-
         builder = new DynamicInstanceBuilder<>(BeanValidator.class, beanClass.getName() + "$Validator");
-        String method = validateObjectMethod(beanClass, null);
-
+        String method = validateMethod(beanClass, null);
         var builder = new CodeBuilder().append("public void validate(Object instance, {} errors, boolean partial) {\n", type(ValidationErrors.class));
         builder.indent(1).append("{}(({}) instance, errors, partial);\n", method, type(beanClass));
         builder.append('}');
@@ -56,12 +53,11 @@ public class BeanValidatorBuilder {
         return Optional.of(this.builder.build());
     }
 
-    private String validateObjectMethod(Class<?> beanClass, String parentPath) {
+    private String validateMethod(Class<?> beanClass, String parentPath) {
         String methodName = "validate" + beanClass.getSimpleName() + (index++);
         var builder = new CodeBuilder().append("private void {}({} bean, {} errors, boolean partial) {\n", methodName, type(beanClass), type(ValidationErrors.class));
         for (Field field : Classes.instanceFields(beanClass)) {
             if (!hasValidationAnnotation(field)) continue;
-            validateAnnotations(field);
 
             Type fieldType = field.getGenericType();
             Class<?> fieldClass = GenericTypes.rawClass(fieldType);
@@ -82,7 +78,7 @@ public class BeanValidatorBuilder {
             } else if (Number.class.isAssignableFrom(fieldClass)) {
                 buildNumberValidation(builder, field, pathLiteral);
             } else if (!isValueClass(fieldClass)) {
-                String method = validateObjectMethod(fieldClass, path(field, parentPath));
+                String method = validateMethod(fieldClass, path(field, parentPath));
                 builder.indent(2).append("{}(bean.{}, errors, partial);\n", method, field.getName());
             }
 
@@ -105,7 +101,7 @@ public class BeanValidatorBuilder {
 
         Class<?> valueClass = GenericTypes.mapValueClass(field.getGenericType());
         if (!isValueClass(valueClass)) {
-            String method = validateObjectMethod(valueClass, path(field, parentPath));
+            String method = validateMethod(valueClass, path(field, parentPath));
             builder.indent(2).append("for (java.util.Iterator iterator = bean.{}.entrySet().iterator(); iterator.hasNext(); ) {\n", field.getName())
                    .indent(3).append("java.util.Map.Entry entry = (java.util.Map.Entry) iterator.next();\n")
                    .indent(3).append("{} value = ({}) entry.getValue();\n", type(valueClass), type(valueClass))
@@ -119,7 +115,7 @@ public class BeanValidatorBuilder {
 
         Class<?> valueClass = GenericTypes.listValueClass(field.getGenericType());
         if (!isValueClass(valueClass)) {
-            String method = validateObjectMethod(valueClass, path(field, parentPath));
+            String method = validateMethod(valueClass, path(field, parentPath));
             builder.indent(2).append("for (java.util.Iterator iterator = bean.{}.iterator(); iterator.hasNext(); ) {\n", field.getName())
                    .indent(3).append("{} value = ({}) iterator.next();\n", type(valueClass), type(valueClass))
                    .indent(3).append("if (value != null) {}(value, errors, partial);\n", method)
@@ -128,8 +124,8 @@ public class BeanValidatorBuilder {
     }
 
     private void buildStringValidation(CodeBuilder builder, Field field, String pathLiteral) {
-        NotEmpty notEmpty = field.getDeclaredAnnotation(NotEmpty.class);
-        if (notEmpty != null) builder.indent(2).append("if ({}.isEmpty(bean.{})) errors.add({}, {});\n", type(Strings.class), field.getName(), pathLiteral, variable(notEmpty.message()));
+        NotBlank notBlank = field.getDeclaredAnnotation(NotBlank.class);
+        if (notBlank != null) builder.indent(2).append("if (bean.{}.isBlank()) errors.add({}, {});\n", field.getName(), pathLiteral, variable(notBlank.message()));
 
         Length length = field.getDeclaredAnnotation(Length.class);
         if (length != null) {
@@ -159,45 +155,23 @@ public class BeanValidatorBuilder {
         return parentPath + "." + path;
     }
 
-    private void validateAnnotations(Field field) {
-        Type fieldType = field.getGenericType();
-        Class<?> fieldClass = GenericTypes.rawClass(fieldType);
-        String fieldPath = Fields.path(field);
-
-        Size size = field.getDeclaredAnnotation(Size.class);
-        if (size != null && !GenericTypes.isList(fieldType) && !GenericTypes.isMap(fieldType))
-            throw Exceptions.error("@Size must on List<?> or Map<String, ?>, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
-
-        NotEmpty notEmpty = field.getDeclaredAnnotation(NotEmpty.class);
-        if (notEmpty != null && !String.class.equals(fieldType))
-            throw Exceptions.error("@NotEmpty must on String, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
-
-        Length length = field.getDeclaredAnnotation(Length.class);
-        if (length != null && !String.class.equals(fieldType))
-            throw Exceptions.error("@Length must on String, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
-
-        Pattern pattern = field.getDeclaredAnnotation(Pattern.class);
-        if (pattern != null) {
-            if (!String.class.equals(fieldType)) throw Exceptions.error("@Pattern must on String, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
-            try {
-                java.util.regex.Pattern.compile(pattern.value());
-            } catch (PatternSyntaxException e) {
-                throw Exceptions.error("@Pattern has invalid pattern, pattern={}, field={}, fieldClass={}", pattern.value(), fieldPath, fieldClass.getCanonicalName(), e);
+    private void validate(Class<?> beanClass) {
+        try {
+            Object beanWithDefaultValues = beanClass.getDeclaredConstructor().newInstance();
+            for (Field field : Classes.instanceFields(beanClass)) {
+                validateAnnotations(field, beanWithDefaultValues);
+                Class<?> targetClass = targetValidationClass(field);
+                if (!isValueClass(targetClass))
+                    validate(targetClass);
             }
+        } catch (ReflectiveOperationException e) {
+            throw new Error(e);
         }
-
-        Max max = field.getDeclaredAnnotation(Max.class);
-        if (max != null && !Number.class.isAssignableFrom(fieldClass))
-            throw Exceptions.error("@Max must on numeric field, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
-
-        Min min = field.getDeclaredAnnotation(Min.class);
-        if (min != null && !Number.class.isAssignableFrom(fieldClass))
-            throw Exceptions.error("@Min must on numeric field, field={}, fieldClass={}", fieldPath, fieldClass.getCanonicalName());
     }
 
     private boolean hasValidationAnnotation(Field field) {
         boolean hasAnnotation = field.isAnnotationPresent(NotNull.class)
-                || field.isAnnotationPresent(NotEmpty.class)
+                || field.isAnnotationPresent(NotBlank.class)
                 || field.isAnnotationPresent(Length.class)
                 || field.isAnnotationPresent(Max.class)
                 || field.isAnnotationPresent(Min.class)
@@ -205,6 +179,16 @@ public class BeanValidatorBuilder {
                 || field.isAnnotationPresent(Size.class);
         if (hasAnnotation) return true;
 
+        Class<?> targetClass = targetValidationClass(field);
+        if (!isValueClass(targetClass)) {
+            for (Field valueField : Classes.instanceFields(targetClass)) {
+                if (hasValidationAnnotation(valueField)) return true;
+            }
+        }
+        return false;
+    }
+
+    private Class<?> targetValidationClass(Field field) {
         Type fieldType = field.getGenericType();
         Class<?> targetClass;
         if (GenericTypes.isList(fieldType)) {
@@ -214,21 +198,51 @@ public class BeanValidatorBuilder {
         } else {
             targetClass = GenericTypes.rawClass(fieldType);
         }
-        if (!isValueClass(targetClass)) {
-            for (Field valueField : Classes.instanceFields(targetClass)) {
-                if (hasValidationAnnotation(valueField)) return true;
+        return targetClass;
+    }
+
+    private void validateAnnotations(Field field, Object beanWithDefaultValues) throws IllegalAccessException {
+        Type fieldType = field.getGenericType();
+
+        if (!field.isAnnotationPresent(NotNull.class) && field.get(beanWithDefaultValues) != null)
+            throw new Error(format("field with default value must have @NotNull, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+
+        Size size = field.getDeclaredAnnotation(Size.class);
+        if (size != null && !GenericTypes.isList(fieldType) && !GenericTypes.isMap(fieldType))
+            throw new Error(format("@Size must on List<?> or Map<String, ?>, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+
+        NotBlank notBlank = field.getDeclaredAnnotation(NotBlank.class);
+        if (notBlank != null && !String.class.equals(fieldType))
+            throw new Error(format("@NotBlank must on String, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+
+        Length length = field.getDeclaredAnnotation(Length.class);
+        if (length != null && !String.class.equals(fieldType))
+            throw new Error(format("@Length must on String, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+
+        Pattern pattern = field.getDeclaredAnnotation(Pattern.class);
+        if (pattern != null) {
+            if (!String.class.equals(fieldType)) throw new Error(format("@Pattern must on String, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+            try {
+                java.util.regex.Pattern.compile(pattern.value());
+            } catch (PatternSyntaxException e) {
+                throw new Error(format("@Pattern has invalid pattern, pattern={}, field={}, fieldType={}", pattern.value(), Fields.path(field), fieldType.getTypeName()), e);
             }
         }
-        return false;
+
+        Class<?> fieldClass = GenericTypes.rawClass(fieldType);
+        Max max = field.getDeclaredAnnotation(Max.class);
+        if (max != null && !Number.class.isAssignableFrom(fieldClass))
+            throw new Error(format("@Max must on Number, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
+
+        Min min = field.getDeclaredAnnotation(Min.class);
+        if (min != null && !Number.class.isAssignableFrom(fieldClass))
+            throw new Error(format("@Min must on Number, field={}, fieldType={}", Fields.path(field), fieldType.getTypeName()));
     }
 
     private boolean isValueClass(Class<?> fieldClass) {
         return String.class.equals(fieldClass)
-                || Integer.class.equals(fieldClass)
+                || Number.class.isAssignableFrom(fieldClass)
                 || Boolean.class.equals(fieldClass)
-                || Long.class.equals(fieldClass)
-                || Double.class.equals(fieldClass)
-                || BigDecimal.class.equals(fieldClass)
                 || LocalDate.class.equals(fieldClass)
                 || LocalDateTime.class.equals(fieldClass)
                 || ZonedDateTime.class.equals(fieldClass)

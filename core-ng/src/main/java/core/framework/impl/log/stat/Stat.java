@@ -47,9 +47,9 @@ public class Stat {
 
         for (GCStat gcStat : gcStats) {
             long count = gcStat.count();
-            long elapsedTime = gcStat.elapsedTime();
+            long elapsed = gcStat.elapsed();
             stats.put("jvm_gc_" + gcStat.name + "_count", (double) count);
-            stats.put("jvm_gc_" + gcStat.name + "_total_elapsed", (double) elapsedTime);
+            stats.put("jvm_gc_" + gcStat.name + "_total_elapsed", (double) elapsed);
         }
 
         collectMetrics(stats);
@@ -67,8 +67,9 @@ public class Stat {
     }
 
     final String garbageCollectorName(String name) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < name.length(); i++) {
+        var builder = new StringBuilder();
+        int length = name.length();
+        for (int i = 0; i < length; i++) {
             char ch = name.charAt(i);
             if (ch == ' ') builder.append('_');
             else builder.append(ASCII.toLowerCase(ch));
@@ -80,7 +81,7 @@ public class Stat {
         final String name;
         final GarbageCollectorMXBean bean;
         long previousCount;
-        long previousElapsedTime;
+        long previousElapsed;
 
         GCStat(String name, GarbageCollectorMXBean bean) {
             this.name = name;
@@ -94,10 +95,10 @@ public class Stat {
             return current - previous;
         }
 
-        long elapsedTime() {
-            long previous = previousElapsedTime;
+        long elapsed() {
+            long previous = previousElapsed;
             long current = bean.getCollectionTime();
-            previousElapsedTime = current;
+            previousElapsed = current;
             return TimeUnit.NANOSECONDS.convert(current - previous, TimeUnit.MILLISECONDS);
         }
     }

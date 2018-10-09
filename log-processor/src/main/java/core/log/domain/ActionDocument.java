@@ -1,16 +1,17 @@
 package core.log.domain;
 
 import core.framework.api.json.Property;
-import core.framework.impl.log.message.PerformanceStatMessage;
+import core.framework.impl.log.message.PerformanceStat;
 import core.framework.search.Index;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
  * @author neo
  */
-@Index(index = "action", type = "action")
+@Index(name = "action")
 public class ActionDocument {
     @Property(name = "date")
     public Instant date;
@@ -18,12 +19,14 @@ public class ActionDocument {
     public String app;
     @Property(name = "server_ip")
     public String serverIP;
-    @Property(name = "id")
-    public String id;
     @Property(name = "result")
     public String result;
     @Property(name = "ref_id")
-    public String refId;
+    public List<String> refIds;
+    @Property(name = "correlation_id")
+    public List<String> correlationIds;
+    @Property(name = "client")
+    public List<String> clients;
     @Property(name = "action")
     public String action;
     @Property(name = "error_code")
@@ -39,5 +42,5 @@ public class ActionDocument {
     @Property(name = "stats")
     public Map<String, Double> stats;
     @Property(name = "perf_stats")
-    public Map<String, PerformanceStatMessage> performanceStats;
+    public Map<String, PerformanceStat> performanceStats;
 }

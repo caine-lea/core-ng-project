@@ -1,7 +1,6 @@
 package core.framework.impl.web.session;
 
 import core.framework.impl.web.request.RequestImpl;
-import core.framework.util.Exceptions;
 import core.framework.web.CookieSpec;
 import core.framework.web.Response;
 import core.framework.web.Session;
@@ -11,6 +10,8 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -29,12 +30,11 @@ public final class SessionManager {
         if (store == null) return null;  // session store is not initialized
         if (!"https".equals(request.scheme())) return null;  // only load session under https
 
-        SessionImpl session = new SessionImpl();
+        var session = new SessionImpl();
         request.cookie(sessionId).ifPresent(sessionId -> {
             logger.debug("load session");
             Map<String, String> values = store.getAndRefresh(sessionId, timeout);
             if (values != null) {
-                logger.debug("[session] values={}", values);
                 session.id = sessionId;
                 session.values.putAll(values);
             }
@@ -61,7 +61,7 @@ public final class SessionManager {
     }
 
     public void sessionStore(SessionStore store) {
-        if (this.store != null) throw Exceptions.error("session store is already configured, previous={}", this.store);
+        if (this.store != null) throw new Error(format("session store is already configured, previous={}", this.store));
         this.store = store;
     }
 

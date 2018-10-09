@@ -1,12 +1,13 @@
 package core.framework.impl.web.http;
 
-import core.framework.util.Exceptions;
 import core.framework.util.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -23,14 +24,14 @@ class RateLimiter {
     public void config(String group, int maxPermits, int fillRate, TimeUnit unit) {
         double fillRatePerNano = ratePerNano(fillRate, unit);
         RateConfig previous = config.put(group, new RateConfig(maxPermits, fillRatePerNano));
-        if (previous != null) throw Exceptions.error("found duplicate group, group={}", group);
+        if (previous != null) throw new Error(format("found duplicate group, group={}", group));
     }
 
     double ratePerNano(int rate, TimeUnit unit) {
         return rate / (double) unit.toNanos(1);
     }
 
-    public boolean acquire(String group, String clientIP) {
+    boolean acquire(String group, String clientIP) {
         RateConfig config = this.config.get(group);
 
         if (config == null) {
@@ -40,8 +41,8 @@ class RateLimiter {
 
         String key = group + "/" + clientIP;
         Rate rate;
-        synchronized (this) {
-            rate = this.rates.computeIfAbsent(key, k -> new Rate(config.maxPermits));
+        synchronized (rates) {
+            rate = rates.computeIfAbsent(key, k -> new Rate(config.maxPermits));
         }
         long currentTime = System.nanoTime();
         return rate.acquire(currentTime, config.maxPermits, config.fillRatePerNano);

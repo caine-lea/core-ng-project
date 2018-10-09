@@ -1,37 +1,37 @@
 package core.framework.impl.http;
 
 import core.framework.api.http.HTTPStatus;
-import core.framework.http.ContentType;
 import core.framework.http.HTTPClient;
 import core.framework.http.HTTPClientException;
+import core.framework.http.HTTPHeaders;
 import core.framework.http.HTTPMethod;
 import core.framework.http.HTTPRequest;
 import core.framework.http.HTTPResponse;
-import core.framework.impl.log.filter.BytesParam;
-import core.framework.impl.log.filter.FieldParam;
-import core.framework.impl.log.filter.JSONParam;
+import core.framework.impl.log.filter.MapLogParam;
 import core.framework.log.ActionLogContext;
 import core.framework.log.Markers;
-import core.framework.util.Charsets;
-import core.framework.util.InputStreams;
 import core.framework.util.Maps;
 import core.framework.util.StopWatch;
-import org.apache.http.Header;
-import org.apache.http.HttpEntity;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpUriRequest;
-import org.apache.http.client.methods.RequestBuilder;
-import org.apache.http.entity.ByteArrayEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
+import core.framework.util.Strings;
+import core.framework.util.Threads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+
+import static java.lang.String.CASE_INSENSITIVE_ORDER;
 
 /**
  * @author neo
@@ -42,10 +42,15 @@ public final class HTTPClientImpl implements HTTPClient {
     static {
         // allow server ssl cert change during renegotiation
         // http client uses pooled connection, multiple requests to same host may hit different server behind LB
+        // refer to sun.security.ssl.ClientHandshakeContext, allowUnsafeServerCertChange = Utilities.getBooleanProperty("jdk.tls.allowUnsafeServerCertChange", false);
         System.setProperty("jdk.tls.allowUnsafeServerCertChange", "true");
 
+        // api client keep alive should be shorter than server side in case server side disconnect connection first, use short value to release connection sooner in quiet time and still fit busy time
+        // refer to jdk.internal.net.http.ConnectionPool
+        System.setProperty("jdk.httpclient.keepalive.timeout", "15");   // 15s timeout for keep alive
+
         HTTPStatus[] values = HTTPStatus.values();
-        HTTP_STATUSES = new HashMap<>(values.length);
+        HTTP_STATUSES = Maps.newHashMapWithExpectedSize(values.length);
         for (HTTPStatus status : values) {
             HTTP_STATUSES.put(status.code, status);
         }
@@ -58,118 +63,134 @@ public final class HTTPClientImpl implements HTTPClient {
     }
 
     private final Logger logger = LoggerFactory.getLogger(HTTPClientImpl.class);
-    private final CloseableHttpClient client;
+    private final HttpClient client;
     private final String userAgent;
+    private final Duration timeout;
+    private final int maxRetries;
     private final long slowOperationThresholdInNanos;
 
-    public HTTPClientImpl(CloseableHttpClient client, String userAgent, Duration slowOperationThreshold) {
+    public HTTPClientImpl(HttpClient client, String userAgent, Duration timeout, int maxRetries, Duration slowOperationThreshold) {
         this.client = client;
         this.userAgent = userAgent;
+        this.timeout = timeout;
+        this.maxRetries = maxRetries;
         slowOperationThresholdInNanos = slowOperationThreshold.toNanos();
     }
 
     @Override
     public HTTPResponse execute(HTTPRequest request) {
-        StopWatch watch = new StopWatch();
-        HttpUriRequest httpRequest = httpRequest(request);
-        try (CloseableHttpResponse httpResponse = client.execute(httpRequest)) {
-            int statusCode = httpResponse.getStatusLine().getStatusCode();
-            logger.debug("[response] status={}", statusCode);
-
-            Map<String, String> headers = Maps.newHashMap();
-            for (Header header : httpResponse.getAllHeaders()) {
-                logger.debug("[response:header] {}={}", header.getName(), header.getValue());
-                headers.putIfAbsent(header.getName(), header.getValue());
-            }
-
-            HttpEntity entity = httpResponse.getEntity();
-            byte[] body = responseBody(entity);
-            HTTPResponse response = new HTTPResponse(parseHTTPStatus(statusCode), headers, body);
-            logResponseText(response);
-            return response;
-        } catch (IOException | UncheckedIOException e) {
-            throw new HTTPClientException(e.getMessage(), "HTTP_COMMUNICATION_FAILED", e);
+        var watch = new StopWatch();
+        try {
+            return executeWithRetry(request);
         } finally {
-            long elapsedTime = watch.elapsedTime();
-            ActionLogContext.track("http", elapsedTime);
-            logger.debug("execute, elapsedTime={}", elapsedTime);
-            if (elapsedTime > slowOperationThresholdInNanos) {
-                logger.warn(Markers.errorCode("SLOW_HTTP"), "slow http operation, elapsedTime={}", elapsedTime);
+            long elapsed = watch.elapsed();
+            ActionLogContext.track("http", elapsed);
+            logger.debug("execute, elapsed={}", elapsed);
+            if (elapsed > slowOperationThresholdInNanos) {
+                logger.warn(Markers.errorCode("SLOW_HTTP"), "slow http operation, elapsed={}", elapsed);
             }
         }
     }
 
-    @Override
-    public void close() {
-        logger.info("close http client, userAgent={}", userAgent);
-        try {
-            client.close();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    private HTTPResponse executeWithRetry(HTTPRequest request) {
+        HttpRequest httpRequest = httpRequest(request);
+        int attempts = 0;
+        while (true) {
+            attempts++;
+            try {
+                HttpResponse<byte[]> httpResponse = client.send(httpRequest, BodyHandlers.ofByteArray());
+                HTTPResponse response = response(httpResponse);
+                if (shouldRetry(attempts, request.method, null, response.status)) {
+                    logger.warn(Markers.errorCode("HTTP_COMMUNICATION_FAILED"), "service unavailable, retry soon");
+                    Threads.sleepRoughly(waitTime(attempts));
+                    continue;
+                }
+                return response;
+            } catch (IOException | InterruptedException e) {
+                if (shouldRetry(attempts, request.method, e, null)) {
+                    logger.warn(Markers.errorCode("HTTP_COMMUNICATION_FAILED"), "http communication failed, retry soon", e);
+                    Threads.sleepRoughly(waitTime(attempts));
+                    continue;
+                }
+                throw new HTTPClientException(e.getMessage(), "HTTP_COMMUNICATION_FAILED", e);
+            }
         }
     }
 
-    HttpUriRequest httpRequest(HTTPRequest request) {
-        HTTPMethod method = request.method();
-        String uri = request.uri();
-        logger.debug("[request] method={}, uri={}", method, uri);
-        RequestBuilder builder = RequestBuilder.create(method.name());
+    HTTPResponse response(HttpResponse<byte[]> httpResponse) {
+        int statusCode = httpResponse.statusCode();
+        logger.debug("[response] status={}", statusCode);
+        Map<String, String> headers = new TreeMap<>(CASE_INSENSITIVE_ORDER);
+        for (Map.Entry<String, List<String>> entry : httpResponse.headers().map().entrySet()) {
+            String name = entry.getKey();
+            if (!Strings.startsWith(name, ':')) {   // not put pseudo headers
+                headers.put(name, entry.getValue().get(0));
+            }
+        }
+        logger.debug("[response] headers={}", new MapLogParam(headers));
+
+        byte[] body = httpResponse.body();
+        HTTPStatus status = parseHTTPStatus(statusCode);
+        var response = new HTTPResponse(status, headers, body);
+        logger.debug("[response] body={}", BodyLogParam.param(body, response.contentType));
+        return response;
+    }
+
+    HttpRequest httpRequest(HTTPRequest request) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder();
+
         try {
-            builder.setUri(uri);
-        } catch (IllegalArgumentException e) {
-            throw new HTTPClientException("uri is invalid, uri=" + uri, "INVALID_URL", e);
+            var requestURI = new URI(requestURI(request.uri, request.params));
+            builder.uri(requestURI);
+
+            if ("https".equals(requestURI.getScheme())) builder.version(HttpClient.Version.HTTP_2);
+
+            logger.debug("[request] method={}, uri={}", request.method, requestURI);
+        } catch (URISyntaxException e) {
+            throw new HTTPClientException("uri is invalid, uri=" + request.uri, "INVALID_URL", e);
         }
 
-        request.headers().forEach((name, value) -> {
-            logger.debug("[request:header] {}={}", name, new FieldParam(name, value));
-            builder.setHeader(name, value);
-        });
+        if (!request.params.isEmpty())
+            logger.debug("[request] params={}", new MapLogParam(request.params));   // due to null/empty will be serialized to empty value, so here to log actual params
 
-        request.params().forEach((name, value) -> {
-            logger.debug("[request:param] {}={}", name, value);
-            builder.addParameter(name, value);
-        });
-
-        byte[] body = request.body();
-        if (body != null) {
-            ContentType contentType = request.contentType();
-            logRequestBody(request, contentType);
-            org.apache.http.entity.ContentType type = org.apache.http.entity.ContentType.create(contentType.mediaType(), contentType.charset().orElse(null));
-            builder.setEntity(new ByteArrayEntity(request.body(), type));
+        request.headers.put(HTTPHeaders.USER_AGENT, userAgent);
+        for (Map.Entry<String, String> entry : request.headers.entrySet()) {
+            builder.setHeader(entry.getKey(), entry.getValue());
         }
+        logger.debug("[request] headers={}", new MapLogParam(request.headers));
 
+        HttpRequest.BodyPublisher bodyPublisher;
+        if (request.body != null) {
+            logger.debug("[request] body={}", BodyLogParam.param(request.body, request.contentType));
+            bodyPublisher = BodyPublishers.ofByteArray(request.body);
+        } else {
+            bodyPublisher = BodyPublishers.noBody();
+        }
+        builder.method(request.method.name(), bodyPublisher);
+
+        builder.timeout(timeout);
         return builder.build();
     }
 
-    private void logRequestBody(HTTPRequest request, ContentType contentType) {
-        Object bodyParam;
-        if (ContentType.APPLICATION_JSON.mediaType().equals(contentType.mediaType())) {
-            bodyParam = new JSONParam(request.body(), contentType.charset().orElse(Charsets.UTF_8));
-        } else {
-            bodyParam = new BytesParam(request.body());
-        }
-        logger.debug("[request] contentType={}, body={}", contentType, bodyParam);
+    private String requestURI(String uri, Map<String, String> params) {
+        if (params.isEmpty()) return uri;
+
+        var builder = new StringBuilder(256).append(uri).append('?');
+        HTTPRequestHelper.urlEncoding(builder, params);
+        return builder.toString();
     }
 
-    byte[] responseBody(HttpEntity entity) throws IOException {
-        if (entity == null) return new byte[0];  // for HEAD request, 204/304/205, http client will not create entity
-
-        try (InputStream stream = entity.getContent()) {
-            int length = (int) entity.getContentLength();
-            if (length >= 0) {
-                return InputStreams.bytesWithExpectedLength(stream, length);
-            } else {
-                return InputStreams.bytes(stream, 4096);
-            }
+    boolean shouldRetry(int attempts, HTTPMethod method, Exception e, HTTPStatus status) {
+        if (attempts >= maxRetries) return false;
+        if (status == HTTPStatus.SERVICE_UNAVAILABLE) return true;
+        if (e != null) {
+            // POST is not idempotent, not retry on read time out
+            return !(method == HTTPMethod.POST && e.getClass().equals(HttpTimeoutException.class));
         }
+        return false;
     }
 
-    private void logResponseText(HTTPResponse response) {
-        response.contentType().ifPresent(contentType -> {
-            String mediaType = contentType.mediaType();
-            if (mediaType.contains("text") || mediaType.contains("json")) {
-                logger.debug("[response] body={}", new BytesParam(response.body(), contentType.charset().orElse(Charsets.UTF_8)));
-            }
-        });
+    Duration waitTime(int attempts) {
+        return Duration.ofMillis(500 << attempts - 1);
     }
 }

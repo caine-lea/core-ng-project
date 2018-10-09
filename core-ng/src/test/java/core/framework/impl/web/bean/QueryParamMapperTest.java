@@ -1,30 +1,37 @@
 package core.framework.impl.web.bean;
 
-import core.framework.util.Maps;
+import core.framework.util.ClasspathResources;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author neo
  */
 class QueryParamMapperTest {
+    private QueryParamMapperBuilder<TestQueryParamBean> builder;
     private QueryParamMapper<TestQueryParamBean> mapper;
 
     @BeforeEach
     void createMapper() {
-        mapper = new QueryParamMapperBuilder<>(TestQueryParamBean.class).build();
+        builder = new QueryParamMapperBuilder<>(TestQueryParamBean.class);
+        mapper = builder.build();
     }
 
     @Test
-    void toParams() {
+    void sourceCode() {
+        String sourceCode = builder.builder.sourceCode();
+        assertEquals(ClasspathResources.text("query-param-mapper-test/test-bean-mapper.java"), sourceCode);
+    }
+
+    @Test
+    void convertBeanToParams() {
         var bean = new TestQueryParamBean();
         bean.stringField = "value";
         bean.intField = 12;
@@ -34,26 +41,29 @@ class QueryParamMapperTest {
 
         Map<String, String> params = mapper.toParams(bean);
 
-        assertEquals("12", params.get("int_field"));
-        assertEquals("22.3", params.get("double_field"));
-        assertEquals("value", params.get("string_field"));
-        assertEquals("2017-08-28T13:44:00", params.get("date_time_field"));
-        assertEquals("V2", params.get("enum_field"));
+        assertThat(params).containsEntry("int_field", "12")
+                          .containsEntry("double_field", "22.3")
+                          .containsEntry("string_field", "value")
+                          .containsEntry("date_time_field", "2017-08-28T13:44:00")
+                          .containsEntry("enum_field", "V2")
+                          .containsEntry("default_value_field", "value");
     }
 
     @Test
     void fromParams() {
-        Map<String, String> params = Maps.newHashMap();
-        params.put("boolean_field", "true");
-        params.put("big_decimal_field", "345.67");
-        params.put("date_field", "2017-08-28");
-        params.put("long_field", "123");
+        var params = Map.of("boolean_field", "true",
+                "big_decimal_field", "345.67",
+                "date_field", "2017-08-28",
+                "long_field", "123",
+                "double_field", "");
 
         TestQueryParamBean bean = mapper.fromParams(params);
 
-        assertTrue(bean.booleanField);
-        assertEquals(BigDecimal.valueOf(345.67), bean.bigDecimalField);
-        assertEquals(LocalDate.of(2017, 8, 28), bean.dateField);
-        assertEquals(Long.valueOf(123), bean.longField);
+        assertThat(bean.booleanField).isTrue();
+        assertThat(bean.bigDecimalField).isEqualTo("345.67");
+        assertThat(bean.dateField).isEqualTo(LocalDate.of(2017, 8, 28));
+        assertThat(bean.longField).isEqualTo(123);
+        assertThat(bean.doubleField).isNull();
+        assertThat(bean.defaultValueField).isEqualTo("value");
     }
 }

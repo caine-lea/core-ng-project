@@ -4,12 +4,12 @@ import core.framework.impl.asm.CodeBuilder;
 import core.framework.impl.asm.DynamicInstanceBuilder;
 import core.framework.impl.reflect.Classes;
 import core.framework.mongo.Id;
-import core.framework.util.Exceptions;
 import org.bson.types.ObjectId;
 
 import java.lang.reflect.Field;
 
 import static core.framework.impl.asm.Literal.type;
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -25,10 +25,10 @@ final class EntityIdHandlerBuilder<T> {
         builder = new DynamicInstanceBuilder<>(EntityIdHandler.class, EntityIdHandler.class.getCanonicalName() + "$" + entityClass.getSimpleName());
     }
 
-    public EntityIdHandler<T> build() {
-        builder.addMethod(getMethod());
-        builder.addMethod(setMethod());
-        builder.addMethod(generateIdIfAbsentMethod());
+    EntityIdHandler<T> build() {
+        builder.addMethod(buildGetMethod());
+        builder.addMethod(buildSetMethod());
+        builder.addMethod(buildGenerateIdIfAbsentMethod());
         return builder.build();
     }
 
@@ -36,19 +36,19 @@ final class EntityIdHandlerBuilder<T> {
         for (Field field : Classes.instanceFields(entityClass)) {
             if (field.isAnnotationPresent(Id.class)) return field;
         }
-        throw Exceptions.error("can not find id field, class={}", entityClass.getCanonicalName());
+        throw new Error(format("can not find id field, class={}", entityClass.getCanonicalName()));
     }
 
-    private String generateIdIfAbsentMethod() {
-        CodeBuilder builder = new CodeBuilder();
+    private String buildGenerateIdIfAbsentMethod() {
+        var builder = new CodeBuilder();
         builder.append("public boolean generateIdIfAbsent() {\n")
                .indent(1).append("return {};\n", ObjectId.class.equals(idField.getType()) ? "true" : "false")
                .append("}");
         return builder.build();
     }
 
-    private String getMethod() {
-        CodeBuilder builder = new CodeBuilder();
+    private String buildGetMethod() {
+        var builder = new CodeBuilder();
         builder.append("public Object get(Object value) {\n")
                .indent(1).append("{} entity = ({}) value;\n", type(entityClass), type(entityClass))
                .indent(1).append("return entity.{};\n", idField.getName())
@@ -56,8 +56,8 @@ final class EntityIdHandlerBuilder<T> {
         return builder.build();
     }
 
-    private String setMethod() {
-        CodeBuilder builder = new CodeBuilder();
+    private String buildSetMethod() {
+        var builder = new CodeBuilder();
         builder.append("public void set(Object value, Object id) {\n")
                .indent(1).append("{} entity = ({}) value;\n", type(entityClass), type(entityClass))
                .indent(1).append("entity.{} = ({}) id;\n", idField.getName(), type(idField.getType()))

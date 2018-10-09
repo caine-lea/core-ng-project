@@ -3,7 +3,6 @@ package core.framework.impl.db;
 import core.framework.db.UncheckedSQLException;
 import core.framework.impl.resource.Pool;
 import core.framework.impl.resource.PoolItem;
-import core.framework.util.Exceptions;
 import core.framework.util.Lists;
 
 import java.math.BigDecimal;
@@ -13,11 +12,15 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -59,8 +62,8 @@ public class DatabaseOperation {
                 setParams(statement, batchParams);
                 statement.addBatch();
                 if (index % batchSize == 0 || index == size) {
-                    int[] batchResult = statement.executeBatch();
-                    System.arraycopy(batchResult, 0, results, index - batchResult.length, batchResult.length);
+                    int[] batchResults = statement.executeBatch();
+                    System.arraycopy(batchResults, 0, results, index - batchResults.length, batchResults.length);
                 }
                 index++;
             }
@@ -105,13 +108,13 @@ public class DatabaseOperation {
         }
     }
 
-    Optional<Long> insert(String sql, Object[] params, String generatedColumn) {
+    OptionalLong insert(String sql, Object[] params, String generatedColumn) {
         PoolItem<Connection> connection = transactionManager.getConnection();
         try (PreparedStatement statement = insertStatement(connection.resource, sql, generatedColumn)) {
             statement.setQueryTimeout(queryTimeoutInSeconds);
             setParams(statement, params);
             statement.executeUpdate();
-            if (generatedColumn == null) return Optional.empty();
+            if (generatedColumn == null) return OptionalLong.empty();
             return fetchGeneratedKey(statement);
         } catch (SQLException e) {
             Connections.checkConnectionStatus(connection, e);
@@ -128,15 +131,14 @@ public class DatabaseOperation {
 
     private void validateSelectSQL(String sql) {
         if (sql.contains("*"))
-            throw Exceptions.error("sql must not contain wildcard(*), please only select columns needed, sql={}", sql);
+            throw new Error(format("sql must not contain wildcard(*), please only select columns needed, sql={}", sql));
     }
 
     private <T> Optional<T> fetchOne(PreparedStatement statement, RowMapper<T> mapper) throws SQLException {
         try (ResultSet resultSet = statement.executeQuery()) {
-            ResultSetWrapper wrapper = new ResultSetWrapper(resultSet);
             T result = null;
             if (resultSet.next()) {
-                result = mapper.map(wrapper);
+                result = mapper.map(new ResultSetWrapper(resultSet));
                 if (resultSet.next())
                     throw new Error("more than one row returned");
             }
@@ -146,7 +148,7 @@ public class DatabaseOperation {
 
     private <T> List<T> fetch(PreparedStatement statement, RowMapper<T> mapper) throws SQLException {
         try (ResultSet resultSet = statement.executeQuery()) {
-            ResultSetWrapper wrapper = new ResultSetWrapper(resultSet);
+            var wrapper = new ResultSetWrapper(resultSet);
             List<T> results = Lists.newArrayList();
             while (resultSet.next()) {
                 T result = mapper.map(wrapper);
@@ -158,21 +160,19 @@ public class DatabaseOperation {
 
     // the LAST_INSERT_ID() function of mysql returns BIGINT, so here it uses Long
     // http://dev.mysql.com/doc/refman/5.7/en/information-functions.html
-    private Optional<Long> fetchGeneratedKey(PreparedStatement statement) throws SQLException {
+    private OptionalLong fetchGeneratedKey(PreparedStatement statement) throws SQLException {
         try (ResultSet keys = statement.getGeneratedKeys()) {
             if (keys.next()) {
-                return Optional.of(keys.getLong(1));
+                return OptionalLong.of(keys.getLong(1));
             }
         }
-        return Optional.empty();
+        return OptionalLong.empty();
     }
 
     private void setParams(PreparedStatement statement, Object... params) throws SQLException {
         if (params != null) {
-            int index = 1;
-            for (Object param : params) {
-                setParam(statement, index, param);
-                index++;
+            for (int i = 0; i < params.length; i++) {
+                setParam(statement, i + 1, params[i]);
             }
         }
     }
@@ -199,9 +199,9 @@ public class DatabaseOperation {
         } else if (param instanceof LocalDate) {
             statement.setDate(index, Date.valueOf((LocalDate) param));
         } else if (param == null) {
-            statement.setObject(index, null);
+            statement.setNull(index, Types.NULL);   // both mysql/hsql driver are not using sqlType param
         } else {
-            throw Exceptions.error("unsupported param type, please contact arch team, type={}, value={}", param.getClass().getCanonicalName(), param);
+            throw new Error(format("unsupported param type, type={}, value={}", param.getClass().getCanonicalName(), param));
         }
     }
 }

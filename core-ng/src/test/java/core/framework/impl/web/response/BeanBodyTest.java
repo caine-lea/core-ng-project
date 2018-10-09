@@ -1,7 +1,7 @@
 package core.framework.impl.web.response;
 
 import core.framework.impl.validate.ValidationException;
-import core.framework.impl.web.bean.BeanClassNameValidator;
+import core.framework.impl.web.bean.BeanMapperRegistry;
 import core.framework.impl.web.bean.ResponseBeanMapper;
 import core.framework.impl.web.bean.TestBean;
 import io.undertow.io.Sender;
@@ -16,9 +16,9 @@ import static org.mockito.Mockito.mock;
 class BeanBodyTest {
     @Test
     void send() {
-        Sender sender = mock(Sender.class);
-        ResponseHandlerContext context = new ResponseHandlerContext(new ResponseBeanMapper(new BeanClassNameValidator()), null);
-        BeanBody body = new BeanBody(new TestBean());
+        var sender = mock(Sender.class);
+        var context = new ResponseHandlerContext(new ResponseBeanMapper(new BeanMapperRegistry()), null);
+        var body = new BeanBody(new TestBean());
         assertThatThrownBy(() -> body.send(sender, context))
                 .isInstanceOf(ValidationException.class);
     }

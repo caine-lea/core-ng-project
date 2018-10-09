@@ -3,27 +3,20 @@ package core.framework.impl.redis;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.time.Duration;
+
+import static core.framework.impl.redis.RedisEncodings.encode;
 
 /**
  * @author neo
  */
 class RedisConnection implements AutoCloseable {
     private static final int DEFAULT_PORT = 6379;
-    private final String host;
-    private final int timeoutInMs;
 
     RedisOutputStream outputStream;
     RedisInputStream inputStream;
-
     private Socket socket;
 
-    RedisConnection(String host, Duration timeout) {
-        this.host = host;
-        timeoutInMs = (int) timeout.toMillis();
-    }
-
-    void connect() throws IOException {
+    void connect(String host, int timeoutInMs) throws IOException {
         socket = new Socket();
         socket.setReuseAddress(true);
         socket.setKeepAlive(true);
@@ -35,8 +28,50 @@ class RedisConnection implements AutoCloseable {
         inputStream = new RedisInputStream(socket.getInputStream());
     }
 
-    void write(Protocol.Command command, byte[]... arguments) throws IOException {
-        Protocol.write(outputStream, command, arguments);
+    void writeKeyCommand(byte[] command, String key) throws IOException {
+        writeArray(2);
+        writeBulkString(command);
+        writeBulkString(encode(key));
+        flush();
+    }
+
+    void writeKeysCommand(byte[] command, String... keys) throws IOException {
+        writeArray(1 + keys.length);
+        writeBulkString(command);
+        for (String key : keys) {
+            writeBulkString(encode(key));
+        }
+        flush();
+    }
+
+    void writeKeyArgumentCommand(byte[] command, String key, byte[] argument) throws IOException {
+        writeArray(3);
+        writeBulkString(command);
+        writeBulkString(encode(key));
+        writeBulkString(argument);
+        flush();
+    }
+
+    void writeKeyArgumentsCommand(byte[] command, String key, String... arguments) throws IOException {
+        writeArray(2 + arguments.length);
+        writeBulkString(command);
+        writeBulkString(encode(key));
+        for (String value : arguments) {
+            writeBulkString(encode(value));
+        }
+        flush();
+    }
+
+    void writeArray(int length) throws IOException {
+        Protocol.writeArray(outputStream, length);
+    }
+
+    void writeBulkString(byte[] value) throws IOException {
+        Protocol.writeBulkString(outputStream, value);
+    }
+
+    void flush() throws IOException {
+        outputStream.flush();
     }
 
     @Override

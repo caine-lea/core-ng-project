@@ -8,12 +8,10 @@ import java.time.Instant;
 /**
  * @author neo
  */
-@Index(index = "trace", type = "trace")
+@Index(name = "trace")
 public class TraceDocument {
     @Property(name = "date")
     public Instant date;
-    @Property(name = "id")
-    public String id;
     @Property(name = "app")
     public String app;
     @Property(name = "result")

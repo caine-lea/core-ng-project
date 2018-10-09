@@ -5,6 +5,7 @@ import java.lang.reflect.Type;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -56,6 +57,7 @@ public final class Types {
             return null;
         }
 
+        // refer to sun.reflect.generics.reflectiveObjects.ParameterizedTypeImpl.hashCode, must return same hashcode as builtin type
         @Override
         public int hashCode() {
             return Arrays.hashCode(arguments) ^ rawType.hashCode();
@@ -63,25 +65,21 @@ public final class Types {
 
         @Override
         public boolean equals(Object other) {
-            if (!(other instanceof ParameterizedType)) {
-                return false;
-            }
+            if (!(other instanceof ParameterizedType)) return false;
+
             ParameterizedType that = (ParameterizedType) other;
-            return rawType.equals(that.getRawType())
-                && that.getOwnerType() == null
-                && Arrays.equals(arguments, that.getActualTypeArguments());
+            return Objects.equals(rawType, that.getRawType())
+                    && that.getOwnerType() == null
+                    && Arrays.equals(arguments, that.getActualTypeArguments());
         }
 
         @Override
         public String toString() {
-            StringBuilder builder = new StringBuilder(rawType.getTypeName())
-                .append('<');
+            var builder = new StringBuilder(rawType.getTypeName()).append('<');
 
-            int i = 0;
-            for (Type argument : arguments) {
+            for (int i = 0; i < arguments.length; i++) {
                 if (i > 0) builder.append(", ");
-                builder.append(argument.getTypeName());
-                i++;
+                builder.append(arguments[i].getTypeName());
             }
 
             builder.append('>');

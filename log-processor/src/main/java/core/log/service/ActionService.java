@@ -18,22 +18,24 @@ import java.util.Map;
  */
 public class ActionService {
     @Inject
+    IndexService indexService;
+    @Inject
     ElasticSearchType<ActionDocument> actionType;
     @Inject
     ElasticSearchType<TraceDocument> traceType;
 
     public void index(List<ActionLogMessage> messages) {
-        LocalDate now = LocalDate.now();
-        index(messages, now);
+        index(messages, LocalDate.now());
+    }
+
+    public void index(ActionLogMessage message) {
+        index(message, LocalDate.now());
     }
 
     void index(List<ActionLogMessage> messages, LocalDate now) {
         if (messages.size() <= 5) { // use single index in quiet time
             for (ActionLogMessage message : messages) {
-                indexAction(action(message), now);
-                if (message.traceLog != null) {
-                    indexTrace(trace(message), now);
-                }
+                index(message, now);
             }
         } else {
             Map<String, ActionDocument> actions = Maps.newHashMapWithExpectedSize(messages.size());
@@ -51,64 +53,71 @@ public class ActionService {
         }
     }
 
-    private void indexAction(ActionDocument action, LocalDate now) {
+    private void index(ActionLogMessage message, LocalDate now) {
+        indexAction(message.id, action(message), now);
+        if (message.traceLog != null) {
+            indexTrace(message.id, trace(message), now);
+        }
+    }
+
+    private void indexAction(String id, ActionDocument action, LocalDate now) {
         IndexRequest<ActionDocument> request = new IndexRequest<>();
-        request.index = IndexName.name("action", now);
-        request.id = action.id;
+        request.index = indexService.indexName("action", now);
+        request.id = id;
         request.source = action;
         actionType.index(request);
     }
 
-    private void indexActions(Map<String, ActionDocument> actions, LocalDate now) {
-        BulkIndexRequest<ActionDocument> request = new BulkIndexRequest<>();
-        request.index = IndexName.name("action", now);
-        request.sources = actions;
-        actionType.bulkIndex(request);
-    }
-
-    private void indexTrace(TraceDocument trace, LocalDate now) {
+    private void indexTrace(String id, TraceDocument trace, LocalDate now) {
         IndexRequest<TraceDocument> request = new IndexRequest<>();
-        request.index = IndexName.name("trace", now);
-        request.id = trace.id;
+        request.index = indexService.indexName("trace", now);
+        request.id = id;
         request.source = trace;
         traceType.index(request);
     }
 
+    private void indexActions(Map<String, ActionDocument> actions, LocalDate now) {
+        BulkIndexRequest<ActionDocument> request = new BulkIndexRequest<>();
+        request.index = indexService.indexName("action", now);
+        request.sources = actions;
+        actionType.bulkIndex(request);
+    }
+
     private void indexTraces(Map<String, TraceDocument> traces, LocalDate now) {
         BulkIndexRequest<TraceDocument> request = new BulkIndexRequest<>();
-        request.index = IndexName.name("trace", now);
+        request.index = indexService.indexName("trace", now);
         request.sources = traces;
         traceType.bulkIndex(request);
     }
 
-    private TraceDocument trace(ActionLogMessage message) {
-        TraceDocument traceLog = new TraceDocument();
-        traceLog.date = message.date;
-        traceLog.id = message.id;
-        traceLog.app = message.app;
-        traceLog.action = message.action;
-        traceLog.result = message.result;
-        traceLog.content = message.traceLog;
-        traceLog.errorCode = message.errorCode;
-        return traceLog;
+    private ActionDocument action(ActionLogMessage message) {
+        var document = new ActionDocument();
+        document.date = message.date;
+        document.app = message.app;
+        document.serverIP = message.serverIP;
+        document.result = message.result;
+        document.action = message.action;
+        document.refIds = message.refIds;
+        document.clients = message.clients;
+        document.correlationIds = message.correlationIds;
+        document.errorCode = message.errorCode;
+        document.errorMessage = message.errorMessage;
+        document.elapsed = message.elapsed;
+        document.cpuTime = message.cpuTime;
+        document.context = message.context;
+        document.stats = message.stats;
+        document.performanceStats = message.performanceStats;
+        return document;
     }
 
-    private ActionDocument action(ActionLogMessage message) {
-        ActionDocument actionLog = new ActionDocument();
-        actionLog.date = message.date;
-        actionLog.app = message.app;
-        actionLog.serverIP = message.serverIP;
-        actionLog.id = message.id;
-        actionLog.result = message.result;
-        actionLog.refId = message.refId;
-        actionLog.action = message.action;
-        actionLog.errorCode = message.errorCode;
-        actionLog.errorMessage = message.errorMessage;
-        actionLog.elapsed = message.elapsed;
-        actionLog.cpuTime = message.cpuTime;
-        actionLog.context = message.context;
-        actionLog.stats = message.stats;
-        actionLog.performanceStats = message.performanceStats;
-        return actionLog;
+    private TraceDocument trace(ActionLogMessage message) {
+        var document = new TraceDocument();
+        document.date = message.date;
+        document.app = message.app;
+        document.action = message.action;
+        document.result = message.result;
+        document.errorCode = message.errorCode;
+        document.content = message.traceLog;
+        return document;
     }
 }

@@ -28,19 +28,16 @@ public class TestModule extends AbstractTestModule {
         loadProperties("test.properties");
 
         overrideBinding(HTTPClient.class, Mockito.mock(HTTPClient.class));  // in test context, override binding is defined before actual binding
-        bind(HTTPClient.class, new HTTPClientBuilder()
-                .keepAliveTimeout(Duration.ofSeconds(5))
-                .maxConnections(10)
-                .enableCookie()
-                .enableRedirect()
-                .build());
+        bind(HTTPClient.class, new HTTPClientBuilder().enableCookie().enableRedirect().build());
 
         configureDB();
         configureKafka();
 
         redis().host("localhost");
 
-        log().writeToConsole();
+        log().writeToKafka("localhost:9092");
+
+        configureCache();
 
         configureHTTP();
         configureSite();
@@ -52,6 +49,11 @@ public class TestModule extends AbstractTestModule {
         configureExecutor();
     }
 
+    private void configureCache() {
+        cache().redis("localhost");
+        cache().add(String.class, Duration.ofHours(6));
+    }
+
     private void configureExecutor() {
         executor().add(null, 1);
         executor().add("name", 1);
@@ -59,6 +61,8 @@ public class TestModule extends AbstractTestModule {
 
     private void configureSite() {
         site().session().redis("localhost");
+        site().session().timeout(Duration.ofMinutes(30));
+        site().session().cookie("SessionId", "localhost");
         site().cdn().host("//cdn");
         site().security().contentSecurityPolicy("default-src 'self' https://cdn; img-src 'self' https://cdn data:; object-src 'none'; frame-src 'none';");
         site().publishAPI("0.0.0.0/0");
@@ -67,13 +71,15 @@ public class TestModule extends AbstractTestModule {
     private void configureHTTP() {
         http().httpPort(8080);
         http().httpsPort(8443);
-        http().enableGZip();
+        http().gzip();
         http().maxForwardedIPs(2);
         http().allowCIDR("0.0.0.0/0");
     }
 
     private void configureKafka() {
         kafka().uri("kafka://localhost:9092");
+        kafka().maxProcessTime(Duration.ofMinutes(30));
+        kafka().poolSize(1);
         kafka().publish("topic", TestMessage.class);
         kafka().subscribe("topic1", TestMessage.class, (List<Message<TestMessage>> messages) -> {
         });
@@ -83,7 +89,7 @@ public class TestModule extends AbstractTestModule {
 
     private void configureDB() {
         db().url("jdbc:mysql://localhost:3306/test");
-        db().defaultIsolationLevel(IsolationLevel.READ_UNCOMMITTED);
+        db().isolationLevel(IsolationLevel.READ_UNCOMMITTED);
         db().timeout(Duration.ofSeconds(10));
         db().batchSize(7);
         db().slowOperationThreshold(Duration.ofSeconds(5));
@@ -93,7 +99,7 @@ public class TestModule extends AbstractTestModule {
         initDB().createSchema();
 
         db("oracle").url("jdbc:oracle:thin:@localhost:1521/test");
-        db().defaultIsolationLevel(IsolationLevel.READ_COMMITTED);
+        db().isolationLevel(IsolationLevel.READ_COMMITTED);
         db("oracle").repository(TestSequenceIdDBEntity.class);
         initDB("oracle").createSchema();
     }

@@ -14,8 +14,8 @@ import java.util.stream.Collectors;
  * @author neo
  */
 public class IPAccessControl {
+    public final List<CIDR> cidrs;
     private final Logger logger = LoggerFactory.getLogger(IPAccessControl.class);
-    private final List<CIDR> cidrs;
 
     public IPAccessControl(String... cidrs) {
         this.cidrs = cidrs(cidrs);
@@ -49,8 +49,8 @@ public class IPAccessControl {
     private boolean allow(String clientIP) {
         InetAddress address = address(clientIP);
         if (isLocal(address)) return true;
-        byte[] ipAddress = address.getAddress();
         if (cidrs != null) {
+            byte[] ipAddress = address.getAddress();
             for (CIDR cidr : cidrs) {
                 if (cidr.matches(ipAddress)) return true;
             }

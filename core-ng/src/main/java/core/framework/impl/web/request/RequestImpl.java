@@ -5,7 +5,6 @@ import core.framework.http.HTTPMethod;
 import core.framework.impl.validate.ValidationException;
 import core.framework.impl.web.bean.RequestBeanMapper;
 import core.framework.util.Encodings;
-import core.framework.util.Exceptions;
 import core.framework.util.Maps;
 import core.framework.web.CookieSpec;
 import core.framework.web.MultipartFile;
@@ -18,6 +17,8 @@ import io.undertow.server.handlers.Cookie;
 import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.Optional;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -37,6 +38,7 @@ public final class RequestImpl implements Request {
     String scheme;
     int port;
     String requestURL;
+    String path;
     ContentType contentType;
     byte[] body;
 
@@ -62,7 +64,7 @@ public final class RequestImpl implements Request {
 
     @Override
     public String path() {
-        return exchange.getRequestPath();
+        return path;
     }
 
     @Override
@@ -73,11 +75,15 @@ public final class RequestImpl implements Request {
     @Override
     public Optional<String> cookie(CookieSpec spec) {
         Cookie cookie = exchange.getRequestCookies().get(spec.name);
+        return parseCookieValue(cookie);
+    }
+
+    Optional<String> parseCookieValue(Cookie cookie) {
         if (cookie == null) return Optional.empty();
         try {
             return Optional.of(Encodings.decodeURIComponent(cookie.getValue()));
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException(e.getMessage(), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException(e.getMessage(), "INVALID_HTTP_REQUEST", e);
         }
     }
 
@@ -99,16 +105,8 @@ public final class RequestImpl implements Request {
     }
 
     @Override
-    public <T> T pathParam(String name, Class<T> valueClass) {
-        String value = pathParams.get(name);
-        return URLParamParser.parse(value, valueClass);
-    }
-
-    @Override
-    public <T> Optional<T> queryParam(String name, Class<T> valueClass) {
-        String value = queryParams.get(name);
-        if (value == null) return Optional.empty();
-        return Optional.of(URLParamParser.parse(value, valueClass));
+    public String pathParam(String name) {
+        return pathParams.get(name);
     }
 
     @Override
@@ -117,18 +115,8 @@ public final class RequestImpl implements Request {
     }
 
     @Override
-    public Optional<String> formParam(String name) {
-        return Optional.ofNullable(formParams.get(name));
-    }
-
-    @Override
     public Map<String, String> formParams() {
         return formParams;
-    }
-
-    @Override
-    public Optional<MultipartFile> file(String name) {
-        return Optional.ofNullable(files.get(name));
     }
 
     @Override
@@ -149,17 +137,17 @@ public final class RequestImpl implements Request {
             } else if (method == HTTPMethod.POST || method == HTTPMethod.PUT || method == HTTPMethod.PATCH) {
                 if (!formParams.isEmpty()) {
                     return mapper.fromParams(beanClass, formParams);
-                } else if (body != null && contentType != null && ContentType.APPLICATION_JSON.mediaType().equals(contentType.mediaType())) {
+                } else if (body != null && contentType != null && ContentType.APPLICATION_JSON.mediaType.equals(contentType.mediaType)) {
                     return mapper.fromJSON(beanClass, body);
                 }
-                throw new BadRequestException("body is missing or unsupported content type, method=" + method + ", contentType=" + contentType);
+                throw new BadRequestException(format("body is missing or unsupported content type, method={}, contentType={}", method, contentType), "INVALID_HTTP_REQUEST");
             } else {
-                throw Exceptions.error("not supported method, method={}", method);
+                throw new Error(format("not supported method, method={}", method));
             }
         } catch (ValidationException e) {
-            throw new BadRequestException(e.getMessage(), "VALIDATION_ERROR", e);
+            throw new BadRequestException(e.getMessage(), e.errorCode(), e);
         } catch (UncheckedIOException e) {  // for invalid json string
-            throw new BadRequestException(e.getMessage(), BadRequestException.DEFAULT_ERROR_CODE, e);
+            throw new BadRequestException(e.getMessage(), "INVALID_HTTP_REQUEST", e);
         }
     }
 }

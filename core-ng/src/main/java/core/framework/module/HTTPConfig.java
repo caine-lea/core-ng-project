@@ -1,15 +1,19 @@
 package core.framework.module;
 
+import core.framework.http.HTTPMethod;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
-import core.framework.impl.web.http.ClientIPInterceptor;
-import core.framework.util.Exceptions;
+import core.framework.impl.web.HTTPIOHandler;
+import core.framework.impl.web.http.IPAccessControl;
+import core.framework.web.Controller;
 import core.framework.web.ErrorHandler;
 import core.framework.web.Interceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
+
+import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -23,16 +27,9 @@ public final class HTTPConfig extends Config {
         this.context = context;
     }
 
-    @Override
-    protected void validate() {
-    }
-
-    public void httpPort(int port) {
-        context.httpServer.httpPort = port;
-    }
-
-    public void httpsPort(int port) {
-        context.httpServer.httpsPort = port;
+    public void route(HTTPMethod method, String path, Controller controller) {
+        if (HTTPIOHandler.HEALTH_CHECK_PATH.equals(path)) throw new Error("/health-check is reserved path");
+        context.route(method, path, controller, false);
     }
 
     public void intercept(Interceptor interceptor) {
@@ -41,6 +38,14 @@ public final class HTTPConfig extends Config {
 
     public void errorHandler(ErrorHandler handler) {
         context.httpServer.handler.errorHandler.customErrorHandler = handler;
+    }
+
+    public void httpPort(int port) {
+        context.httpServer.httpPort = port;
+    }
+
+    public void httpsPort(int port) {
+        context.httpServer.httpsPort = port;
     }
 
     public LimitRateConfig limitRate() {
@@ -54,7 +59,7 @@ public final class HTTPConfig extends Config {
      * @param maxIPs the max number for forwarded ips
      */
     public void maxForwardedIPs(int maxIPs) {
-        if (maxIPs < 1) throw Exceptions.error("maxIPs must be greater than 1, maxIPs={}", maxIPs);
+        if (maxIPs < 1) throw new Error(format("maxIPs must be greater than 1, maxIPs={}", maxIPs));
         context.httpServer.handler.requestParser.clientIPParser.maxForwardedIPs = maxIPs;
     }
 
@@ -64,11 +69,15 @@ public final class HTTPConfig extends Config {
      * @param cidrs cidr blocks
      */
     public void allowCIDR(String... cidrs) {
+        if (context.httpServer.handler.accessControl != null) {
+            throw new Error(format("allow cidr is already configured, cidrs={}, previous={}", Arrays.toString(cidrs), context.httpServer.handler.accessControl.cidrs));
+        }
+
         logger.info("limit remote access, cidrs={}", Arrays.toString(cidrs));
-        context.httpServer.handler.interceptors.add(new ClientIPInterceptor(cidrs));
+        context.httpServer.handler.accessControl = new IPAccessControl(cidrs);
     }
 
-    public void enableGZip() {
+    public void gzip() {
         context.httpServer.gzip = true;
     }
 }

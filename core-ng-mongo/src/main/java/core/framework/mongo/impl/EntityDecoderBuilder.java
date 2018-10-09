@@ -35,10 +35,10 @@ final class EntityDecoderBuilder<T> {
         builder = new DynamicInstanceBuilder<>(EntityDecoder.class, EntityDecoder.class.getCanonicalName() + "$" + entityClass.getSimpleName());
     }
 
-    public EntityDecoder<T> build() {
+    EntityDecoder<T> build() {
         builder.addField("private final {} logger = {}.getLogger({});", type(Logger.class), type(LoggerFactory.class), variable(EntityDecoder.class));
         String methodName = decodeEntityMethod(entityClass);
-        CodeBuilder builder = new CodeBuilder()
+        var builder = new CodeBuilder()
                 .append("public Object decode(org.bson.BsonReader reader) {\n")
                 .indent(1).append("{} wrapper = new {}(reader);\n", type(BsonReaderWrapper.class), type(BsonReaderWrapper.class))
                 .indent(1).append("return {}(reader, wrapper, {});\n", methodName, variable(""))
@@ -143,28 +143,28 @@ final class EntityDecoderBuilder<T> {
     }
 
     private String decodeValue(CodeBuilder builder, Type valueType, int indent) {
-        Class<?> valueClass = GenericTypes.rawClass(valueType);
         String variable = "$" + (index++);
         builder.indent(indent);
         if (Integer.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readInteger(fieldPath);\n", type(valueType), variable);
+            builder.append("java.lang.Integer {} = wrapper.readInteger(fieldPath);\n", variable);
         } else if (String.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readString(fieldPath);\n", type(valueType), variable);
+            builder.append("java.lang.String {} = wrapper.readString(fieldPath);\n", variable);
         } else if (Long.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readLong(fieldPath);\n", type(valueType), variable);
+            builder.append("java.lang.Long {} = wrapper.readLong(fieldPath);\n", variable);
         } else if (LocalDateTime.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readLocalDateTime(fieldPath);\n", type(valueType), variable);
+            builder.append("java.time.LocalDateTime {} = wrapper.readLocalDateTime(fieldPath);\n", variable);
         } else if (ZonedDateTime.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readZonedDateTime(fieldPath);\n", type(valueType), variable);
+            builder.append("java.time.ZonedDateTime {} = wrapper.readZonedDateTime(fieldPath);\n", variable);
         } else if (GenericTypes.rawClass(valueType).isEnum()) {
-            String enumCodecVariable = registerEnumCodec(GenericTypes.rawClass(valueType));
-            builder.append("{} {} = ({}) {}.read(reader, fieldPath);\n", type(valueType), variable, type(valueType), enumCodecVariable, type(valueType));
+            Class<?> valueClass = GenericTypes.rawClass(valueType);
+            String enumCodecVariable = registerEnumCodec(valueClass);
+            builder.append("{} {} = ({}) {}.read(reader, fieldPath);\n", type(valueClass), variable, type(valueClass), enumCodecVariable);
         } else if (Double.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readDouble(fieldPath);\n", type(valueType), variable);
+            builder.append("java.lang.Double {} = wrapper.readDouble(fieldPath);\n", variable);
         } else if (ObjectId.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readObjectId(fieldPath);\n", type(valueType), variable);
+            builder.append("org.bson.types.ObjectId {} = wrapper.readObjectId(fieldPath);\n", variable);
         } else if (Boolean.class.equals(valueType)) {
-            builder.append("{} {} = wrapper.readBoolean(fieldPath);\n", type(valueType), variable);
+            builder.append("java.lang.Boolean {} = wrapper.readBoolean(fieldPath);\n", variable);
         } else if (GenericTypes.isGenericList(valueType)) {
             String method = decodeListMethod(GenericTypes.listValueClass(valueType));
             builder.append("java.util.List {} = {}(reader, wrapper, fieldPath);\n", variable, method);
@@ -172,8 +172,9 @@ final class EntityDecoderBuilder<T> {
             String method = decodeMapMethod(GenericTypes.mapValueClass(valueType));
             builder.append("java.util.Map {} = {}(reader, wrapper, fieldPath);\n", variable, method);
         } else {
+            Class<?> valueClass = GenericTypes.rawClass(valueType);
             String method = decodeEntityMethod(valueClass);
-            builder.append("{} {} = {}(reader, wrapper, fieldPath);\n", type(valueType), variable, method);
+            builder.append("{} {} = {}(reader, wrapper, fieldPath);\n", type(valueClass), variable, method);
         }
         return variable;
     }

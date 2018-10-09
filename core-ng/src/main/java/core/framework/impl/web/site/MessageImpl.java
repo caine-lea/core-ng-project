@@ -1,6 +1,5 @@
 package core.framework.impl.web.site;
 
-import core.framework.util.Exceptions;
 import core.framework.util.Lists;
 import core.framework.util.Maps;
 import core.framework.util.Properties;
@@ -19,14 +18,16 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static core.framework.util.Strings.format;
+
 /**
  * @author neo
  */
 public class MessageImpl implements Message {
     static final String DEFAULT_LANGUAGE = "_default";
     private static final Pattern MESSAGE_PROPERTY_PATH_PATTERN = Pattern.compile("[^_]+((_[a-zA-Z0-9]{2,4})*)\\.properties");
+    final Map<String, List<Properties>> messages = Maps.newHashMap();
     private final Logger logger = LoggerFactory.getLogger(MessageImpl.class);
-    private final Map<String, List<Properties>> messages = Maps.newHashMap();
     String[] languages = new String[]{DEFAULT_LANGUAGE};
 
     public void load(List<String> paths, String... languages) {
@@ -51,7 +52,7 @@ public class MessageImpl implements Message {
         validateMessageKeys();
     }
 
-    private void validateMessageKeys() {
+    void validateMessageKeys() {
         Map<String, Set<String>> allLanguageKeys = Maps.newHashMap();
         Set<String> allKeys = Sets.newHashSet();
         messages.forEach((language, languageProperties) -> {
@@ -64,7 +65,7 @@ public class MessageImpl implements Message {
             if (!allKeys.equals(keys)) {
                 Set<String> missingKeys = new HashSet<>(allKeys);
                 missingKeys.removeAll(keys);
-                throw Exceptions.error("message keys are missing for language, language={}, keys={}", language, missingKeys);
+                throw new Error(format("message keys are missing for language, language={}, keys={}", language, missingKeys));
             }
         });
     }
@@ -72,12 +73,12 @@ public class MessageImpl implements Message {
     private void validateLanguage(String path, String language) {
         if (DEFAULT_LANGUAGE.equals(language)) return;
 
-        if (languages.length == 1 && languages[0].equals(DEFAULT_LANGUAGE)) {
-            throw Exceptions.error("language found, but only default language is enabled, path={}, language={}", path, language);
+        if (languages.length == 1 && DEFAULT_LANGUAGE.equals(languages[0])) {
+            throw new Error(format("found language specific messages, but only default language is enabled, path={}, language={}", path, language));
         }
 
         if (Arrays.stream(languages).noneMatch(enabledLanguage -> enabledLanguage.startsWith(language))) {
-            throw Exceptions.error("language does not match enabled languages, path={}, language={}", path, language);
+            throw new Error(format("language does not match enabled languages, path={}, language={}", path, language));
         }
     }
 
@@ -99,17 +100,21 @@ public class MessageImpl implements Message {
     String language(String path) {
         Matcher matcher = MESSAGE_PROPERTY_PATH_PATTERN.matcher(path);
         if (!matcher.matches())
-            throw Exceptions.error("property path must match 'path/name_language.properties' pattern, path={}", path);
+            throw new Error(format("property path must match 'path/name_language.properties' pattern, path={}", path));
         String languagePostfix = matcher.group(1);
-        if (Strings.isEmpty(languagePostfix)) return DEFAULT_LANGUAGE;
+        if (Strings.isBlank(languagePostfix)) return DEFAULT_LANGUAGE;
         return languagePostfix.substring(1);
     }
 
     @Override
-    public Optional<String> get(String key, String language) {
+    public String get(String key, String language) {
+        return getMessage(key, language).orElseThrow(() -> new Error(format("can not find message, key={}", key)));
+    }
+
+    Optional<String> getMessage(String key, String language) {
         String targetLanguage = language == null ? DEFAULT_LANGUAGE : language;
         List<Properties> properties = messages.get(targetLanguage);
-        if (properties == null) throw Exceptions.error("language is not defined, please check site().message(), language={}", targetLanguage);
+        if (properties == null) throw new Error(format("language is not defined, please check site().message(), language={}", targetLanguage));
         for (Properties property : properties) {
             Optional<String> message = property.get(key);
             if (message.isPresent()) return message;

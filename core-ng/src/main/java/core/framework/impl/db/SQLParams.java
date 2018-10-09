@@ -1,9 +1,29 @@
 package core.framework.impl.db;
 
+import core.framework.impl.log.filter.LogParam;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Set;
+
 /**
  * @author neo
  */
-public class SQLParams {
+class SQLParams implements LogParam {
+    private static final Logger LOGGER = LoggerFactory.getLogger(SQLParams.class);
+
+    static String value(Object param, EnumDBMapper mapper) {
+        if (param instanceof Enum) {
+            try {
+                return mapper.getDBValue((Enum<?>) param);
+            } catch (Throwable e) {
+                LOGGER.warn("failed to get db enum value, error={}", e.getMessage(), e);
+                return String.valueOf(param);
+            }
+        }
+        return String.valueOf(param);
+    }
+
     private final EnumDBMapper mapper;
     private final Object[] params;
 
@@ -13,21 +33,17 @@ public class SQLParams {
     }
 
     @Override
-    public String toString() {
-        if (params == null) return "null";
-        StringBuilder builder = new StringBuilder().append('[');
-        int length = params.length;
-        for (int i = 0; i < length; i++) {
-            if (i > 0) builder.append(", ");
-            builder.append(value(params[i]));
+    public void append(StringBuilder builder, Set<String> maskedFields, int maxParamLength) {
+        if (params == null) {
+            builder.append("null");
+        } else {
+            builder.append('[');
+            int length = params.length;
+            for (int i = 0; i < length; i++) {
+                if (i > 0) builder.append(", ");
+                builder.append(value(params[i], mapper));
+            }
+            builder.append(']');
         }
-        return builder.append(']').toString();
-    }
-
-    private String value(Object param) {
-        if (param instanceof Enum) {
-            return mapper.getDBValue((Enum<?>) param);
-        }
-        return String.valueOf(param);
     }
 }

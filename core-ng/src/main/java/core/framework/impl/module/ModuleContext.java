@@ -4,7 +4,6 @@ import core.framework.async.Task;
 import core.framework.http.HTTPMethod;
 import core.framework.impl.inject.BeanFactory;
 import core.framework.impl.log.LogManager;
-import core.framework.impl.log.stat.Stat;
 import core.framework.impl.web.HTTPServer;
 import core.framework.impl.web.controller.ControllerClassValidator;
 import core.framework.impl.web.controller.ControllerHolder;
@@ -14,6 +13,7 @@ import core.framework.impl.web.management.PropertyController;
 import core.framework.impl.web.route.PathPatternValidator;
 import core.framework.impl.web.service.ErrorResponse;
 import core.framework.impl.web.site.AJAXErrorResponse;
+import core.framework.internal.stat.Stat;
 import core.framework.util.ASCII;
 import core.framework.util.Lists;
 import core.framework.util.Maps;
@@ -46,7 +46,8 @@ public class ModuleContext {
         beanFactory.bind(WebDirectory.class, null, httpServer.siteManager.webDirectory);
         startupHook.add(httpServer::start);
         shutdownHook.add(ShutdownHook.STAGE_0, timeout -> httpServer.shutdown());
-        shutdownHook.add(ShutdownHook.STAGE_1, httpServer::awaitTermination);
+        shutdownHook.add(ShutdownHook.STAGE_1, httpServer::awaitRequestCompletion);
+        shutdownHook.add(ShutdownHook.STAGE_9, timeout -> httpServer.awaitTermination());
 
         httpServer.handler.beanMapperRegistry.register(ErrorResponse.class);
         httpServer.handler.beanMapperRegistry.register(AJAXErrorResponse.class);
@@ -63,8 +64,8 @@ public class ModuleContext {
         if (backgroundTask == null) {
             backgroundTask = new BackgroundTaskExecutor();
             startupHook.add(backgroundTask::start);
-            shutdownHook.add(ShutdownHook.STAGE_0, timeout -> backgroundTask.shutdown());
-            shutdownHook.add(ShutdownHook.STAGE_2, backgroundTask::awaitTermination);
+            shutdownHook.add(ShutdownHook.STAGE_2, timeoutInMs -> backgroundTask.shutdown());
+            shutdownHook.add(ShutdownHook.STAGE_3, backgroundTask::awaitTermination);
         }
         return backgroundTask;
     }

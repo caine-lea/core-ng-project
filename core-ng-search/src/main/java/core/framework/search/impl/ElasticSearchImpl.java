@@ -1,10 +1,9 @@
 package core.framework.search.impl;
 
-import core.framework.impl.json.JSONReader;
+import core.framework.internal.json.JSONMapper;
 import core.framework.search.ClusterStateResponse;
 import core.framework.search.ElasticSearch;
 import core.framework.search.ElasticSearchType;
-import core.framework.util.InputStreams;
 import core.framework.util.StopWatch;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
@@ -126,8 +125,8 @@ public class ElasticSearchImpl implements ElasticSearch {
         try {
             Response response = client().getLowLevelClient().performRequest(new Request("GET", "/_cluster/state/metadata"));
             byte[] bytes = responseBody(response.getEntity());
-            JSONReader<ClusterStateResponse> reader = JSONReader.of(ClusterStateResponse.class);
-            return reader.fromJSON(bytes);
+            JSONMapper<ClusterStateResponse> mapper = new JSONMapper<>(ClusterStateResponse.class);
+            return mapper.fromJSON(bytes);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         } finally {
@@ -137,8 +136,7 @@ public class ElasticSearchImpl implements ElasticSearch {
 
     private byte[] responseBody(HttpEntity entity) throws IOException {
         try (InputStream stream = entity.getContent()) {
-            int length = (int) entity.getContentLength();
-            return InputStreams.bytesWithExpectedLength(stream, length);
+            return stream.readAllBytes();
         }
     }
 

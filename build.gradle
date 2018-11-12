@@ -2,10 +2,10 @@ apply from: file("${rootDir}/gradle/project.gradle")
 
 subprojects {
     group = 'core.framework'
-    version = '6.9.2'
+    version = '6.9.11.4'
 }
 
-def elasticVersion = '6.4.0'
+def elasticVersion = '6.4.2'
 def kafkaVersion = '2.0.0'
 def jacksonVersion = '2.9.7'
 def junitVersion = '5.3.1'
@@ -20,11 +20,12 @@ project(':core-ng') {
     apply from: file("${rootDir}/gradle/lib.gradle")
     dependencies {
         api project(":core-ng-api")
-        api 'org.slf4j:slf4j-api:1.7.25'
-        implementation 'org.javassist:javassist:3.23.1-GA'
+        api 'org.slf4j:slf4j-api:1.8.0-beta2'
+        implementation 'org.javassist:javassist:3.24.0-GA'
         implementation "com.fasterxml.jackson.module:jackson-module-afterburner:${jacksonVersion}"
         implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonVersion}"
-        implementation 'io.undertow:undertow-core:2.0.13.Final'
+        implementation 'com.squareup.okhttp3:okhttp:3.11.0'
+        implementation 'io.undertow:undertow-core:2.0.15.Final'
         compileOnly "org.apache.kafka:kafka-clients:${kafkaVersion}@jar"
         testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
         testImplementation "org.mockito:mockito-core:${mockitoVersion}"

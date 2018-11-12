@@ -7,7 +7,6 @@ import io.undertow.Undertow;
 import io.undertow.UndertowOptions;
 import io.undertow.server.HttpHandler;
 import io.undertow.server.handlers.encoding.ContentEncodingRepository;
-import io.undertow.server.handlers.encoding.DeflateEncodingProvider;
 import io.undertow.server.handlers.encoding.EncodingHandler;
 import io.undertow.server.handlers.encoding.GzipEncodingProvider;
 import org.slf4j.Logger;
@@ -31,7 +30,7 @@ public class HTTPServer {
     private Undertow server;
 
     public HTTPServer(LogManager logManager) {
-        handler = new HTTPHandler(logManager, siteManager.sessionManager, siteManager.templateManager);
+        handler = new HTTPHandler(logManager, siteManager.sessionManager, siteManager.templateManager, shutdownHandler);
     }
 
     public void start() {
@@ -44,11 +43,13 @@ public class HTTPServer {
             if (httpsPort != null) builder.addHttpsListener(httpsPort, "0.0.0.0", new SSLContextBuilder().build());
 
             builder.setHandler(handler())
+                   .setServerOption(UndertowOptions.DECODE_URL, Boolean.FALSE)
                    .setServerOption(UndertowOptions.ENABLE_HTTP2, Boolean.TRUE)
                    .setServerOption(UndertowOptions.ENABLE_RFC6265_COOKIE_VALIDATION, Boolean.TRUE)
                    // since we don't use Expires or Last- Modified header, so it's not necessary to set Date header, for cache, prefer cache-control/max-age
                    // refer to https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.18.1
                    .setServerOption(UndertowOptions.ALWAYS_SET_DATE, Boolean.FALSE)
+                   .setServerOption(UndertowOptions.ALWAYS_SET_KEEP_ALIVE, Boolean.FALSE)
                    // set tcp idle timeout to 620s, by default AWS ALB uses 60s, GCloud LB uses 600s, since it is always deployed with LB, longer timeout doesn't hurt
                    // refer to https://cloud.google.com/load-balancing/docs/https/#timeouts_and_retries
                    // refer to https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html#connection-idle-timeout
@@ -66,10 +67,9 @@ public class HTTPServer {
     private HttpHandler handler() {
         HttpHandler handler = new HTTPIOHandler(this.handler, shutdownHandler);
         if (gzip) {
-            var predicate = new GZipPredicate();
+            // only support gzip, deflate is less popular
             handler = new EncodingHandler(handler, new ContentEncodingRepository()
-                    .addEncodingHandler("gzip", new GzipEncodingProvider(), 100, predicate)
-                    .addEncodingHandler("deflate", new DeflateEncodingProvider(), 10, predicate));
+                    .addEncodingHandler("gzip", new GzipEncodingProvider(), 100, new GZipPredicate()));
         }
         return handler;
     }
@@ -77,24 +77,28 @@ public class HTTPServer {
     public void shutdown() {
         if (server != null) {
             logger.info("shutting down http server");
-            shutdownHandler.shutdown();
+            shutdownHandler.shutdown.set(true);
             if (handler.webSocketHandler != null)
                 handler.webSocketHandler.shutdown();
         }
     }
 
-    public void awaitTermination(long timeoutInMs) throws InterruptedException {
+    public void awaitRequestCompletion(long timeoutInMs) throws InterruptedException {
         if (server != null) {
-            try {
-                boolean success = shutdownHandler.awaitTermination(timeoutInMs);
-                if (!success) {
-                    logger.warn("failed to wait all http requests to complete");
-                    server.getWorker().shutdownNow();
-                }
-            } finally {
-                server.stop();
-                logger.info("http server stopped");
+            boolean success = shutdownHandler.awaitTermination(timeoutInMs);
+            if (!success) {
+                logger.warn("failed to wait active http requests to complete");
+                server.getWorker().shutdownNow();
+            } else {
+                logger.info("active http requests completed");
             }
+        }
+    }
+
+    public void awaitTermination() {
+        if (server != null) {
+            server.stop();
+            logger.info("http server stopped");
         }
     }
 }

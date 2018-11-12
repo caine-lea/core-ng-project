@@ -1,13 +1,14 @@
 package core.framework.impl.kafka;
 
-import core.framework.impl.json.JSONReader;
 import core.framework.impl.log.LogManager;
 import core.framework.kafka.BulkMessageHandler;
 import core.framework.kafka.MessageHandler;
+import core.framework.util.ASCII;
 import core.framework.util.StopWatch;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,9 +53,7 @@ public class MessageListener {
     public <T> void subscribe(String topic, Class<T> messageClass, MessageHandler<T> handler, BulkMessageHandler<T> bulkHandler) {
         boolean added = topics.add(topic);
         if (!added) throw new Error(format("topic is already subscribed, topic={}", topic));
-        MessageValidator<T> validator = new MessageValidator<>(messageClass);
-        JSONReader<T> reader = JSONReader.of(messageClass);
-        processes.put(topic, new MessageProcess<>(handler, bulkHandler, reader, validator));
+        processes.put(topic, new MessageProcess<>(handler, bulkHandler, messageClass));
     }
 
     public void start() {
@@ -106,7 +105,7 @@ public class MessageListener {
         Map<String, Object> config = Map.of(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, uri,   // immutable map requires value must not be null
                 ConsumerConfig.GROUP_ID_CONFIG, LogManager.APP_NAME,
                 ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, Boolean.FALSE,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest",
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, ASCII.toLowerCase(OffsetResetStrategy.LATEST.name()),      // refer to org.apache.kafka.clients.consumer.ConsumerConfig, must be in("latest", "earliest", "none")
                 ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) maxProcessTime.toMillis(),
                 ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, (int) maxProcessTime.plusSeconds(5).toMillis(),
                 ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords,

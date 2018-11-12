@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -14,8 +13,8 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.UUID;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.nio.file.Files.createDirectories;
-import static java.nio.file.Files.delete;
 import static java.nio.file.Files.getLastModifiedTime;
 import static java.nio.file.Files.readAllBytes;
 import static java.nio.file.Files.walkFileTree;
@@ -27,7 +26,7 @@ public final class Files {
     private static final Logger LOGGER = LoggerFactory.getLogger(Files.class);
 
     public static String text(Path file) {
-        return new String(bytes(file), StandardCharsets.UTF_8);
+        return new String(bytes(file), UTF_8);
     }
 
     public static byte[] bytes(Path file) {
@@ -54,13 +53,13 @@ public final class Files {
         try {
             walkFileTree(directory, new SimpleFileVisitor<>() {
                 @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
                     delete(file);
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
-                public FileVisitResult postVisitDirectory(Path dir, IOException e) throws IOException {
+                public FileVisitResult postVisitDirectory(Path dir, IOException e) {
                     delete(dir);
                     return FileVisitResult.CONTINUE;
                 }
@@ -82,6 +81,14 @@ public final class Files {
         Path path = Paths.get(tempDir + "/" + UUID.randomUUID().toString());
         createDir(path);
         return path;
+    }
+
+    public static void delete(Path file) {
+        try {
+            java.nio.file.Files.delete(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     public static long size(Path file) {

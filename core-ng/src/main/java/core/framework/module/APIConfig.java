@@ -2,7 +2,7 @@ package core.framework.module;
 
 import core.framework.api.web.service.Path;
 import core.framework.http.HTTPClient;
-import core.framework.http.HTTPClientBuilder;
+import core.framework.http.HTTPClientBuilderV2;
 import core.framework.http.HTTPMethod;
 import core.framework.impl.module.Config;
 import core.framework.impl.module.ModuleContext;
@@ -39,18 +39,19 @@ public class APIConfig extends Config {
     final Set<Class<?>> beanClasses = new HashSet<>();     // extra beans not defined in service interfaces, e.g. web socket json, raw controller request/response
     private final Logger logger = LoggerFactory.getLogger(APIConfig.class);
     private ModuleContext context;
-    private HTTPClientBuilder httpClientBuilder;
+    private HTTPClientBuilderV2 httpClientBuilder;
     private HTTPClient httpClient;
 
     @Override
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
-        httpClientBuilder = new HTTPClientBuilder()
+        httpClientBuilder = new HTTPClientBuilderV2()
                 .userAgent(WebServiceClient.USER_AGENT)
                 .trustAll()
-                .timeout(Duration.ofSeconds(15))    // kube graceful shutdown period is 30s, we need to finish api call within that time
-                .maxRetries(3)
-                .slowOperationThreshold(Duration.ofSeconds(10));
+                .connectTimeout(Duration.ofSeconds(2))
+                .timeout(Duration.ofSeconds(20))    // refer to: kube graceful shutdown period is 30s, db timeout is 15s
+                .slowOperationThreshold(Duration.ofSeconds(10))
+                .maxRetries(5);
     }
 
     public <T> void service(Class<T> serviceInterface, T service) {
@@ -98,7 +99,7 @@ public class APIConfig extends Config {
         return new WebServiceClientBuilder<>(serviceInterface, webServiceClient).build();
     }
 
-    public HTTPClientBuilder httpClient() {
+    public HTTPClientBuilderV2 httpClient() {
         if (httpClient != null) throw new Error("http client must be configured before adding client");
         return httpClientBuilder;
     }

@@ -1,4 +1,33 @@
 ## Change log
+### 6.9.11.4 (10/18/2018 - 11/7/2018)   !!! this build is mainly to experiment api client http communication failure during deployment
+* httpclient: experiment to use okHTTP as http client
+* httpclient: added connectTimeout, as for internal api or external page fetching, it requires different settings
+* executor: shutdown executor in 2 steps, as there may multiple executors
+* executor: support submit task with delay, to support application retry task, to avoid sleep during task execution
+* http: shutdown http server at last, and hold shutdown at least 500ms to accept incoming request during shutdown (give kube/service iptable time to take effect)
+* http: tweak gracefully shutdown, make server actively close connection if during shutdown, to make client not reuse it due to keep alive
+* http: enabled HTTP2 support back, 
+        disabled "always write keep alive response header", since it's default for HTTP/1.1
+        HTTP/1.0 client is less popular, for apache benchmark tool (ab), use alternative one (e.g. h2load from nghttp2, which will be installed with curl+http2 support)   
+* http: in graceful shutdown handler, set "connection: close" header to ask client close the connection during deployment
+* db: close connection if query timed out, refer to core.framework.impl.db.Connections for reason
+
+### 6.9.6 (10/16/2018 - 10/18/2018)
+* log: collect cpu usage stat, in container env, system load != cpu container/java process usage
+* http: changed Response.empty() return 200 status code 
+        due to jdk httpclient bug, it hangs if server return 204 no content, without content-length, see https://bugs.openjdk.java.net/browse/JDK-8211437  
+
+### 6.9.5 (10/16/2018)
+* http: disable http2 for both server and client, as jdk http client may cause busy loop issue if transaction is not proper closed
+
+### 6.9.4 (10/11/2018 - 10/15/2018)
+* util: removed InputStreams, with JDK 11, inputStream added readAllBytes() method to read all bytes
+* httpclient: support gzip content-type
+
+### 6.9.3 (10/8/2018 - 10/11/2018)
+* log: update slfj4 to 1.8, which switched to service provider model to bind logger factory and added java module support
+* httpClient: fix keep alive timeout setting
+
 ### 6.9.2 (10/3/2018 - 10/8/2018)
 * httpClient: tweak request/response to make it more low level style, 
 * api: refined query param bean behavior, empty value will be treated as null, refer to core.framework.impl.web.bean.QueryParamMapper 
@@ -131,7 +160,7 @@ due to removed support List<T> as request/response type
 ### 6.4.0 (6/24/2018 - 6/25/2018)
 * session: !!! redis session key changed from "sessionId:{id}" to "sessionId:{sha256(id)}" for security reason, so the redis log won't show clear text session id value, 
         update lib will lose all existing user session, please deploy on scheduled time
-* httpClient: added retry support, refer to core.framework.impl.http.RetryHandler for details
+* httpClient: added retry support, refer to core.framework.internal.http.RetryHandler for details
         make API client to retry (in kube env, persistent connection can be stale during deployment)
 
 ### 6.3.7 (6/21/2018 - 6/24/2018)

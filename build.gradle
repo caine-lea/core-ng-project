@@ -2,11 +2,11 @@ apply from: file("${rootDir}/gradle/project.gradle")
 
 subprojects {
     group = 'core.framework'
-    version = '6.9.11.4'
+    version = '6.10.4'
 }
 
-def elasticVersion = '6.4.2'
-def kafkaVersion = '2.0.0'
+def elasticVersion = '6.5.1'
+def kafkaVersion = '2.1.0'
 def jacksonVersion = '2.9.7'
 def junitVersion = '5.3.1'
 def mockitoVersion = '2.22.0'
@@ -24,9 +24,10 @@ project(':core-ng') {
         implementation 'org.javassist:javassist:3.24.0-GA'
         implementation "com.fasterxml.jackson.module:jackson-module-afterburner:${jacksonVersion}"
         implementation "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${jacksonVersion}"
-        implementation 'com.squareup.okhttp3:okhttp:3.11.0'
+        implementation 'com.squareup.okhttp3:okhttp:3.12.0'
         implementation 'io.undertow:undertow-core:2.0.15.Final'
         compileOnly "org.apache.kafka:kafka-clients:${kafkaVersion}@jar"
+        compileOnly 'dnsjava:dnsjava:2.1.8'     // to support specify nameserver in http client
         testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
         testImplementation "org.mockito:mockito-core:${mockitoVersion}"
         testImplementation "org.assertj:assertj-core:${assertjVersion}"
@@ -52,9 +53,8 @@ project(':core-ng-mongo') {
     apply from: file("${rootDir}/gradle/lib.gradle")
     dependencies {
         api project(":core-ng")
-        api 'org.mongodb:mongo-java-driver:3.5.0'
+        api 'org.mongodb:mongo-java-driver:3.9.0'
         testImplementation project(":core-ng-test")
-        testImplementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
     }
 }
 
@@ -63,7 +63,7 @@ project(':core-ng-mongo-test') {
     dependencies {
         api project(":core-ng-test")
         api project(":core-ng-mongo")
-        implementation 'com.github.fakemongo:fongo:2.1.1'
+        implementation 'de.bwaldvogel:mongo-java-server:1.9.7'
     }
 }
 
@@ -84,9 +84,9 @@ project(':core-ng-search-test') {
         implementation "org.elasticsearch.plugin:transport-netty4-client:${elasticVersion}"
         implementation "org.elasticsearch.plugin:reindex-client:${elasticVersion}"
         implementation "org.codelibs.elasticsearch.module:lang-painless:${elasticVersion}"
-        implementation "org.codelibs.elasticsearch.module:mapper-extras:${elasticVersion}"     // used by elasticsearch scaled_float
-        implementation "org.codelibs.elasticsearch.module:analysis-common:${elasticVersion}"     // used by elasticsearch stemmer
-        implementation 'org.apache.logging.log4j:log4j-core:2.9.1'  // used by elasticsearch local node
+        implementation "org.codelibs.elasticsearch.module:mapper-extras:${elasticVersion}"      // used by elasticsearch scaled_float
+        implementation "org.codelibs.elasticsearch.module:analysis-common:${elasticVersion}"    // used by elasticsearch stemmer
+        implementation 'org.apache.logging.log4j:log4j-core:2.11.1'                             // used by elasticsearch local node
     }
 }
 

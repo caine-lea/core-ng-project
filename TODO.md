@@ -5,7 +5,7 @@
 * template, use ByteBuffer[] for performance?
 * mongo: collect mongo stats thru JMX ConnectionPoolStatisticsMBean?
 * mongo: update entity decoder to use switch(fieldName) to replace if statement? (optimization)
-* cache: hit rate report?
+* cache: hit rate report? cluster support? envoy?
 * framework error (queue listener, background task error, customer scheduler trigger) forward to kafka?
 * streaming, data pipeline? (kafka stream/beam/google dataflow) 
 
@@ -16,6 +16,8 @@
 * impl own json bind by referring https://github.com/json-iterator/java and https://github.com/ngs-doo/dsl-json with annotation processor?
 * rethink module structure to fit java module export requirement
 * run diagnostic when heap usage is high, send trace, log().alert() ?
+* JSON.from/to add validation?
+* specify app_name by ENV to allow deploy multiple same service as different name
 
 ### jdk 9/10/11 issues
 * spotbugs: OBL bug https://github.com/spotbugs/spotbugs/issues/432  

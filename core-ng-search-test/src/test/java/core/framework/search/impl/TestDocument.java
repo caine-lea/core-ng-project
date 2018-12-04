@@ -25,8 +25,11 @@ public class TestDocument {
     @Property(name = "string_field")
     public String stringField;
 
-    @Property(name = "num_field")
-    public Integer numField;
+    @Property(name = "int_field")
+    public Integer intField;
+
+    @Property(name = "double_field")
+    public Double doubleField;
 
     @Property(name = "zoned_date_time_field")
     public ZonedDateTime zonedDateTimeField;

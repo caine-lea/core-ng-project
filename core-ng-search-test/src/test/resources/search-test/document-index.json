@@ -62,8 +62,11 @@
           "analyzer": "english",
           "search_analyzer": "english_search"
         },
-        "num_field": {
+        "int_field": {
           "type": "integer"
+        },
+        "double_field": {
+          "type": "double"
         },
         "zoned_date_time_field": {
           "type": "date"

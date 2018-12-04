@@ -1,7 +1,7 @@
 package core.framework.internal.log.appender;
 
-import core.framework.impl.kafka.ProducerMetrics;
 import core.framework.internal.json.JSONMapper;
+import core.framework.internal.kafka.ProducerMetrics;
 import core.framework.internal.log.message.ActionLogMessage;
 import core.framework.internal.log.message.LogTopics;
 import core.framework.internal.log.message.StatMessage;
@@ -53,8 +53,9 @@ public final class KafkaAppender implements LogAppender {
             Map<String, Object> config = Map.of(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, uri,
                     ProducerConfig.ACKS_CONFIG, "0",                                    // no acknowledge to maximize performance
                     ProducerConfig.MAX_BLOCK_MS_CONFIG, Duration.ofSeconds(30).toMillis(),  // metadata update timeout
-                    ProducerConfig.COMPRESSION_TYPE_CONFIG, CompressionType.SNAPPY.name,
+                    ProducerConfig.COMPRESSION_TYPE_CONFIG, CompressionType.ZSTD.name,
                     ProducerConfig.LINGER_MS_CONFIG, 50,
+                    ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, (int) Duration.ofSeconds(60).toMillis(),     // DELIVERY_TIMEOUT_MS_CONFIG is INT type
                     ProducerConfig.CLIENT_ID_CONFIG, "log-forwarder");      // if not specify, kafka uses producer-${seq} name, also impact jmx naming
             var serializer = new ByteArraySerializer();
             producer = new KafkaProducer<>(config, serializer, serializer);

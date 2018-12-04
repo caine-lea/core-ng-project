@@ -1,9 +1,10 @@
-package core.framework.impl.kafka;
+package core.framework.internal.kafka;
 
 import core.framework.impl.log.LogManager;
 import core.framework.kafka.BulkMessageHandler;
 import core.framework.kafka.MessageHandler;
 import core.framework.util.ASCII;
+import core.framework.util.Network;
 import core.framework.util.StopWatch;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -18,6 +19,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static core.framework.util.Strings.format;
 
@@ -25,6 +27,7 @@ import static core.framework.util.Strings.format;
  * @author neo
  */
 public class MessageListener {
+    private static final AtomicInteger CONSUMER_CLIENT_ID_SEQUENCE = new AtomicInteger(1);
     public final ConsumerMetrics consumerMetrics;
     final Map<String, MessageProcess<?>> processes = new HashMap<>();
     final LogManager logManager;
@@ -69,13 +72,18 @@ public class MessageListener {
         var watch = new StopWatch();
         for (int i = 0; i < poolSize; i++) {
             watch.reset();
-            String name = "kafka-listener-" + (this.name == null ? "" : this.name + "-") + i;
-            Consumer<byte[], byte[]> consumer = consumer(topics);
+            String name = listenerThreadName(this.name, i);
+            Consumer<byte[], byte[]> consumer = consumer();
+            consumer.subscribe(topics);
             var thread = new MessageListenerThread(name, consumer, this);
             threads[i] = thread;
             logger.info("create kafka listener thread, topics={}, name={}, elapsed={}", topics, name, watch.elapsed());
         }
         return threads;
+    }
+
+    String listenerThreadName(String name, int index) {
+        return "kafka-listener-" + (name == null ? "" : name + "-") + index;
     }
 
     public void shutdown() {
@@ -101,20 +109,21 @@ public class MessageListener {
         }
     }
 
-    private Consumer<byte[], byte[]> consumer(Set<String> topics) {
-        Map<String, Object> config = Map.of(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, uri,   // immutable map requires value must not be null
-                ConsumerConfig.GROUP_ID_CONFIG, LogManager.APP_NAME,
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, Boolean.FALSE,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, ASCII.toLowerCase(OffsetResetStrategy.LATEST.name()),      // refer to org.apache.kafka.clients.consumer.ConsumerConfig, must be in("latest", "earliest", "none")
-                ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) maxProcessTime.toMillis(),
-                ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, (int) maxProcessTime.plusSeconds(5).toMillis(),
-                ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords,
-                ConsumerConfig.FETCH_MAX_BYTES_CONFIG, maxPollBytes,
-                ConsumerConfig.FETCH_MIN_BYTES_CONFIG, minPollBytes,
-                ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, (int) minPollMaxWaitTime.toMillis());
+    Consumer<byte[], byte[]> consumer() {
+        Map<String, Object> config = new HashMap<>();
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, uri);   // immutable map requires value must not be null
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, LogManager.APP_NAME);
+        config.put(ConsumerConfig.CLIENT_ID_CONFIG, Network.LOCAL_HOST_NAME + "-" + CONSUMER_CLIENT_ID_SEQUENCE.getAndIncrement());      // will show in monitor metrics
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, Boolean.FALSE);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, ASCII.toLowerCase(OffsetResetStrategy.LATEST.name()));      // refer to org.apache.kafka.clients.consumer.ConsumerConfig, must be in("latest", "earliest", "none")
+        config.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) maxProcessTime.toMillis());
+        config.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, (int) maxProcessTime.plusSeconds(5).toMillis());
+        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
+        config.put(ConsumerConfig.FETCH_MAX_BYTES_CONFIG, maxPollBytes);
+        config.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, minPollBytes);
+        config.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, (int) minPollMaxWaitTime.toMillis());
         var deserializer = new ByteArrayDeserializer();
         Consumer<byte[], byte[]> consumer = new KafkaConsumer<>(config, deserializer, deserializer);
-        consumer.subscribe(topics);
         consumerMetrics.add(consumer.metrics());
         return consumer;
     }

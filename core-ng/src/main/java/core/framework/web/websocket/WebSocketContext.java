@@ -6,5 +6,7 @@ import java.util.List;
  * @author neo
  */
 public interface WebSocketContext {
-    List<Channel> room(String name);
+    <V> List<Channel<V>> all();
+
+    <V> List<Channel<V>> room(String name);
 }

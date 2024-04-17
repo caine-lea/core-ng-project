@@ -7,7 +7,7 @@ import static java.lang.annotation.ElementType.FIELD;
 import static java.lang.annotation.RetentionPolicy.RUNTIME;
 
 /**
- * Size is used on List and Map.
+ * Size is used on String, List and Map.
  *
  * @author neo
  */
@@ -18,5 +18,5 @@ public @interface Size {
 
     int max() default -1;
 
-    String message() default "size must be between min and max";
+    String message() default "size must be between {min} and {max}, size={value}";
 }

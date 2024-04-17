@@ -1,0 +1,16 @@
+{
+  "ignoreErrors": [
+    {"apps": ["website"], "errorCodes": ["PATH_NOT_FOUND"]}
+  ],
+  "criticalErrors": [],
+  "kibanaURL": "http://kibana:5601",
+  "notifications": [
+    {"channel": "actionWarnChannel", "matcher": {"severity": "WARN", "indices": ["trace", "stat"]}},
+    {"channel": "actionErrorChannel", "matcher": {"severity": "ERROR", "indices": ["trace", "stat"]}},
+    {"channel": "eventWarnChannel", "matcher": {"severity": "WARN", "indices": ["event"]}},
+    {"channel": "eventErrorChannel", "matcher": {"severity": "ERROR", "indices": ["event"]}},
+    {"channel": "additionalErrorCodeChannel", "matcher": {"apps": ["product-service"], "errorCodes": ["PRODUCT_ERROR"]}},
+    {"channel": "pagerduty://serviceId", "matcher": {"apps": ["kafka"], "errorCodes": ["HIGH_DISK_USAGE"], "indices": ["stat"]}},
+    {"channel": "pagerduty://serviceId?priorityId=mockPriorityId&escalationPolicyId=mockEscalationPolicyId", "matcher": {"apps": ["kafka"], "errorCodes": ["HIGH_DISK_USAGE"], "indices": ["stat"]}}
+  ]
+}

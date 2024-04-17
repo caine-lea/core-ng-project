@@ -1,16 +1,15 @@
 package core.framework.test.db;
 
-import core.framework.api.validate.Length;
 import core.framework.api.validate.NotNull;
+import core.framework.api.validate.Size;
 import core.framework.db.Column;
 import core.framework.db.Database;
 import core.framework.db.PrimaryKey;
 import core.framework.db.Table;
-import core.framework.impl.asm.CodeBuilder;
-import core.framework.impl.reflect.Classes;
+import core.framework.internal.asm.CodeBuilder;
+import core.framework.internal.reflect.Classes;
 import core.framework.util.Lists;
 import core.framework.util.StopWatch;
-import core.framework.util.Strings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,8 +19,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
 import java.util.List;
-
-import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -53,7 +50,7 @@ public final class EntitySchemaGenerator {
         List<String> statements = Lists.newArrayList();
 
         var builder = new CodeBuilder()
-                .append("CREATE TABLE ");
+            .append("CREATE TABLE ");
         Table table = entityClass.getDeclaredAnnotation(Table.class);
         builder.append(table.name()).append(" (");
 
@@ -64,13 +61,10 @@ public final class EntitySchemaGenerator {
             PrimaryKey primaryKey = field.getDeclaredAnnotation(PrimaryKey.class);
 
             builder.append(column.name()).append(' ');
-            builder.append(columnType(field.getType(), field.getDeclaredAnnotation(Length.class)));
+            builder.append(columnType(field.getType(), field.getDeclaredAnnotation(Size.class), column.json()));
 
             if (primaryKey != null) {
                 if (primaryKey.autoIncrement()) builder.append(" AUTO_INCREMENT");
-                if (!Strings.isBlank(primaryKey.sequence())) {
-                    statements.add("CREATE SEQUENCE IF NOT EXISTS " + primaryKey.sequence());
-                }
                 primaryKeys.add(column.name());
             }
 
@@ -89,16 +83,17 @@ public final class EntitySchemaGenerator {
     }
 
     // http://dev.mysql.com/doc/connector-j/en/connector-j-reference-type-conversions.html
-    private String columnType(Class<?> fieldClass, Length lengthAnnotation) {
+    private String columnType(Class<?> fieldClass, Size size, boolean json) {
+        if (json) return "TEXT";
         if (Integer.class.equals(fieldClass)) return "INT";
         if (Long.class.equals(fieldClass)) return "BIGINT";
         if (String.class.equals(fieldClass)) {
             int length = 500;
-            if (lengthAnnotation != null && lengthAnnotation.max() > 0) length = lengthAnnotation.max();
+            if (size != null && size.max() > 0) length = size.max();
             return "VARCHAR(" + length + ")";
         }
         if (fieldClass.isEnum()) {
-            return "VARCHAR(100)";
+            return "VARCHAR(100)";  // generally length of enum values is smaller than 100
         }
         if (Boolean.class.equals(fieldClass)) {
             return "BIT(1)";
@@ -107,14 +102,17 @@ public final class EntitySchemaGenerator {
             return "DOUBLE";
         }
         if (BigDecimal.class.equals(fieldClass)) {
-            return "DECIMAL(10,2)";
+            return "DECIMAL(20,6)";
         }
-        if (LocalDateTime.class.equals(fieldClass) || ZonedDateTime.class.equals(fieldClass)) {
-            return "TIMESTAMP";
+        if (LocalDateTime.class.equals(fieldClass)) {
+            return "DATETIME";
+        }
+        if (ZonedDateTime.class.equals(fieldClass)) {
+            return "TIMESTAMP(6)";
         }
         if (LocalDate.class.equals(fieldClass)) {
             return "DATE";
         }
-        throw new Error(format("unsupported field class, class={}", fieldClass.getCanonicalName()));
+        throw new Error("unsupported field class, class=" + fieldClass.getCanonicalName());
     }
 }

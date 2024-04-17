@@ -1,12 +1,13 @@
 package core.framework.module;
 
 import core.framework.async.Task;
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.module.ShutdownHook;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.module.ShutdownHook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.lang.reflect.Type;
 import java.util.Optional;
 
@@ -29,13 +30,13 @@ public abstract class Module {
     }
 
     public void onStartup(Task task) {
-        context.startupHook.add(task);
+        // put all custom startup task on start stage
+        context.startupHook.start.add(task);
     }
 
     public <T> T bind(Class<T> instanceClass) {
         T instance = context.beanFactory.create(instanceClass);
-        context.bind(instanceClass, null, instance);
-        return instance;
+        return context.bind(instanceClass, null, instance);
     }
 
     public <T> T bind(T instance) {
@@ -46,19 +47,18 @@ public abstract class Module {
         return bind(instanceClass, null, instance);
     }
 
-    public <T> T bind(Type type, String name, T instance) {
+    public <T> T bind(Type type, @Nullable String name, T instance) {
         context.beanFactory.inject(instance);
-        context.bind(type, name, instance);
-        return instance;
+        return context.bind(type, name, instance);
+    }
+
+    public <T> T bean(Class<T> instanceClass) {
+        return bean(instanceClass, null);
     }
 
     @SuppressWarnings("unchecked")
-    public <T> T bean(Class<T> instanceClass) {
-        return (T) bean(instanceClass, null);
-    }
-
-    public Object bean(Type type, String name) {
-        return context.beanFactory.bean(type, name);
+    public <T> T bean(Type type, @Nullable String name) {
+        return (T) context.beanFactory.bean(type, name);
     }
 
     public void loadProperties(String classpath) {
@@ -67,7 +67,7 @@ public abstract class Module {
     }
 
     public Optional<String> property(String key) {
-        return context.propertyManager.property(key);
+        return context.property(key);
     }
 
     public String requiredProperty(String key) {
@@ -83,7 +83,7 @@ public abstract class Module {
     }
 
     public WebSocketConfig ws() {
-        return new WebSocketConfig(context);
+        return context.config(WebSocketConfig.class, null);
     }
 
     public SiteConfig site() {
@@ -96,10 +96,6 @@ public abstract class Module {
 
     public SchedulerConfig schedule() {
         return context.config(SchedulerConfig.class, null);
-    }
-
-    public ExecutorConfig executor() {
-        return context.config(ExecutorConfig.class, null);
     }
 
     public APIConfig api() {
@@ -118,6 +114,10 @@ public abstract class Module {
         return context.config(RedisConfig.class, null);
     }
 
+    public RedisConfig redis(String name) {
+        return context.config(RedisConfig.class, name);
+    }
+
     public KafkaConfig kafka() {
         return kafka(null);
     }
@@ -132,6 +132,19 @@ public abstract class Module {
 
     public <T extends Config> T config(Class<T> configClass, String name) {
         return context.config(configClass, name);
+    }
+
+    public void highCPUUsageThreshold(double threshold) {
+        context.collector.highCPUUsageThreshold = threshold;
+    }
+
+    public void highHeapUsageThreshold(double threshold) {
+        context.collector.highHeapUsageThreshold = threshold;
+    }
+
+    // monitor java process VmRSS / cgroup ram limit
+    public void highMemUsageThreshold(double threshold) {
+        context.collector.highMemUsageThreshold = threshold;
     }
 
     protected abstract void initialize();

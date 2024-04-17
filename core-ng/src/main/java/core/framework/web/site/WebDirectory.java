@@ -10,8 +10,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import static core.framework.util.Strings.format;
-
 /**
  * @author neo
  */
@@ -36,7 +34,7 @@ public final class WebDirectory {
         } else {
             Path path = findLocalRootDirectory();
             if (path != null) {
-                logger.warn("found local web directory, this should only happen in local dev env or test, path={}", path);
+                logger.info("found local web directory, this should only happen in local dev env or test, path={}", path);
                 localEnv = true;
                 try {
                     return path.toRealPath();
@@ -50,21 +48,19 @@ public final class WebDirectory {
     }
 
     private Path findLocalRootDirectory() {
-        Path path = Paths.get("./src/main/web");
-        if (Files.isDirectory(path)) return path;
-        path = Paths.get("./src/main/dist/web");
+        Path path = Paths.get("./src/main/dist/web");
         if (Files.isDirectory(path)) return path;
         return null;
     }
 
     public Path path(String path) {
-        if (!Strings.startsWith(path, '/')) throw new Error(format("path must start with '/', path={}", path));
+        if (!Strings.startsWith(path, '/')) throw new Error("path must start with '/', path=" + path);
         return root().resolve(path.substring(1)).toAbsolutePath();
     }
 
     public Path root() {
         if (root == null)
-            throw new Error(format("can not find web path, set working dir to module path for local dev env, workingDir={}, or check -Dcore.webPath for server env.", System.getProperty("user.dir")));
+            throw new Error("can not find web path, set working dir to module dir for local dev env, or check -Dcore.webPath for server env, workingDir=" + System.getProperty("user.dir"));
         return root;
     }
 }

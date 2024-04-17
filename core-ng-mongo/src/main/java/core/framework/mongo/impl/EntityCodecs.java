@@ -11,8 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static core.framework.util.Strings.format;
-
 /**
  * @author neo
  */
@@ -44,7 +42,7 @@ public final class EntityCodecs {
         EntityCodec<T> codec = new EntityCodec<>(entityClass, idHandler, entityEncoder, entityDecoder);
         Codec<?> previous = codecs.putIfAbsent(entityClass, codec);
         if (previous != null)
-            throw new Error(format("entity or view class is registered, entityClass={}", entityClass.getCanonicalName()));
+            throw new Error("entity or view class is registered, entityClass=" + entityClass.getCanonicalName());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -52,6 +50,7 @@ public final class EntityCodecs {
         List<Codec<?>> codecs = new ArrayList<>(this.codecs.values());
         codecs.add(new LocalDateTimeCodec());
         codecs.add(new ZonedDateTimeCodec());
+        codecs.add(new LocalDateCodec());
         for (Class<? extends Enum<?>> enumClass : enumClasses) {
             codecs.add(new EnumCodec(enumClass));
         }

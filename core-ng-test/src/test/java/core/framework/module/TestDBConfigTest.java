@@ -1,6 +1,5 @@
 package core.framework.module;
 
-import core.framework.impl.db.Vendor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -19,10 +18,11 @@ class TestDBConfigTest {
 
     @Test
     void databaseURL() {
-        assertThat(config.databaseURL(null, Vendor.MYSQL))
-                .isEqualTo("jdbc:hsqldb:mem:.;sql.syntax_mys=true");
+        assertThat(config.databaseURL(null))
+            .isEqualTo("jdbc:hsqldb:mem:.;sql.syntax_mys=true");
 
-        assertThat(config.databaseURL(null, Vendor.ORACLE))
-                .isEqualTo("jdbc:hsqldb:mem:.;sql.syntax_ora=true");
+        config.name = "db1";
+        assertThat(config.databaseURL(null))
+            .isEqualTo("jdbc:hsqldb:mem:db1;sql.syntax_mys=true");
     }
 }

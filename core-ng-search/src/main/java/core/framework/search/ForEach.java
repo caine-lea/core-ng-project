@@ -1,8 +1,8 @@
 package core.framework.search;
 
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 
+import javax.annotation.Nullable;
 import java.time.Duration;
 import java.util.function.Consumer;
 
@@ -10,9 +10,10 @@ import java.util.function.Consumer;
  * @author neo
  */
 public class ForEach<T> {
+    @Nullable
     public String index;
-    public QueryBuilder query = QueryBuilders.matchAllQuery();
+    public Query query = new Query.Builder().matchAll(m -> m).build();
     public Duration scrollTimeout = Duration.ofMinutes(1);
-    public Integer limit = 1000;
+    public Integer batchSize = 1000;
     public Consumer<T> consumer;
 }

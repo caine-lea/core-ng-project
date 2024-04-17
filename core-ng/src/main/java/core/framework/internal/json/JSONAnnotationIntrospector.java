@@ -1,15 +1,15 @@
 package core.framework.internal.json;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility;
 import com.fasterxml.jackson.core.Version;
 import com.fasterxml.jackson.databind.AnnotationIntrospector;
 import com.fasterxml.jackson.databind.PropertyName;
+import com.fasterxml.jackson.databind.cfg.MapperConfig;
 import com.fasterxml.jackson.databind.introspect.Annotated;
 import com.fasterxml.jackson.databind.introspect.AnnotatedClass;
-import com.fasterxml.jackson.databind.introspect.VisibilityChecker;
+import com.fasterxml.jackson.databind.introspect.AnnotatedField;
 import core.framework.api.json.Property;
 
-import java.lang.reflect.Field;
+import java.io.Serial;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -17,6 +17,7 @@ import java.util.Map;
  * @author neo
  */
 public class JSONAnnotationIntrospector extends AnnotationIntrospector {
+    @Serial
     private static final long serialVersionUID = 3638140740110527623L;
 
     @Override
@@ -25,25 +26,17 @@ public class JSONAnnotationIntrospector extends AnnotationIntrospector {
     }
 
     @Override
-    public VisibilityChecker<?> findAutoDetectVisibility(AnnotatedClass annotatedClass, VisibilityChecker<?> checker) {
-        return checker.withFieldVisibility(Visibility.PUBLIC_ONLY)
-                      .withSetterVisibility(Visibility.NONE)
-                      .withGetterVisibility(Visibility.NONE)
-                      .withIsGetterVisibility(Visibility.NONE);
-    }
-
-    @Override
     public PropertyName findNameForSerialization(Annotated annotated) {
         return propertyName(annotated);
     }
 
     @Override
-    public String[] findEnumValues(Class<?> enumType, Enum<?>[] enumValues, String[] names) {
+    public String[] findEnumValues(MapperConfig<?> config, AnnotatedClass annotatedClass, Enum<?>[] enumValues, String[] names) {
         Map<String, String> mappings = null;
-        for (Field field : enumType.getDeclaredFields()) {
-            if (!field.isEnumConstant()) continue;
+        for (AnnotatedField field : annotatedClass.fields()) {
+            if (!field.getAnnotated().isEnumConstant()) continue;
 
-            Property enumValue = field.getDeclaredAnnotation(Property.class);
+            Property enumValue = field.getAnnotation(Property.class);
             if (enumValue == null) continue;
 
             String value = enumValue.name();

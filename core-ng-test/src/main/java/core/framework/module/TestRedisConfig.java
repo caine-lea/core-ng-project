@@ -19,11 +19,11 @@ public class TestRedisConfig extends RedisConfig {
     }
 
     @Override
-    public void poolSize(int minSize, int maxSize) {
+    public void password(String password) {
     }
 
     @Override
-    public void slowOperationThreshold(Duration threshold) {
+    public void poolSize(int minSize, int maxSize) {
     }
 
     @Override

@@ -1,5 +1,6 @@
 package core.framework.web;
 
+import javax.annotation.Nullable;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -10,11 +11,15 @@ public final class CookieSpec {
     private static final Duration SESSION_SCOPE = Duration.ofSeconds(-1);
 
     public final String name;
+    @Nullable
     public String domain;
+    @Nullable
     public String path;
     public boolean httpOnly;
     public boolean secure;
+    @Nullable
     public Duration maxAge;
+    public boolean sameSite;
 
     public CookieSpec(String name) {
         this.name = name;
@@ -46,7 +51,12 @@ public final class CookieSpec {
     }
 
     public CookieSpec sessionScope() {
-        this.maxAge = SESSION_SCOPE;
+        maxAge = SESSION_SCOPE;
+        return this;
+    }
+
+    public CookieSpec sameSite() {
+        sameSite = true;
         return this;
     }
 

@@ -1,14 +1,19 @@
 package core.framework.test.redis;
 
 import core.framework.redis.Redis;
+import core.framework.redis.RedisAdmin;
 import core.framework.redis.RedisHash;
+import core.framework.redis.RedisHyperLogLog;
 import core.framework.redis.RedisList;
 import core.framework.redis.RedisSet;
+import core.framework.redis.RedisSortedSet;
 import core.framework.util.Maps;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.Consumer;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author neo
@@ -18,6 +23,9 @@ public final class MockRedis implements Redis {
     private final MockRedisHash hash = new MockRedisHash(store);
     private final MockRedisSet set = new MockRedisSet(store);
     private final MockRedisList list = new MockRedisList(store);
+    private final MockRedisSortedSet sortedSet = new MockRedisSortedSet(store);
+    private final MockRedisAdmin admin = new MockRedisAdmin();
+    private final MockRedisHyperLogLog hyperLogLog = new MockRedisHyperLogLog(store);
 
     @Override
     public String get(String key) {
@@ -53,6 +61,7 @@ public final class MockRedis implements Redis {
 
     @Override
     public long del(String... keys) {
+        assertThat(keys).isNotEmpty();
         long removed = 0;
         for (String key : keys) {
             if (store.store.remove(key) != null) removed++;
@@ -73,6 +82,7 @@ public final class MockRedis implements Redis {
 
     @Override
     public Map<String, String> multiGet(String... keys) {
+        assertThat(keys).isNotEmpty();
         Map<String, String> results = Maps.newLinkedHashMapWithExpectedSize(keys.length);
         for (String key : keys) {
             String value = get(key);
@@ -102,7 +112,22 @@ public final class MockRedis implements Redis {
     }
 
     @Override
+    public RedisAdmin admin() {
+        return admin;
+    }
+
+    @Override
+    public RedisHyperLogLog hyperLogLog() {
+        return hyperLogLog;
+    }
+
+    @Override
     public RedisList list() {
         return list;
+    }
+
+    @Override
+    public RedisSortedSet sortedSet() {
+        return sortedSet;
     }
 }

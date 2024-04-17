@@ -16,10 +16,17 @@ public class TestModule extends AbstractTestModule {
         SearchConfig search = config(SearchConfig.class);
         search.host("localhost");
         search.timeout(Duration.ofSeconds(5));
-        search.slowOperationThreshold(Duration.ofSeconds(5));
+        search.maxResultWindow(1000);
         search.type(TestDocument.class);
 
-        config(InitSearchConfig.class).createIndex("document", "search-test/document-index.json");
-        config(InitSearchConfig.class).createIndexTemplate("document", "search-test/document-index-template.json");
+        InitSearchConfig initSearch = config(InitSearchConfig.class);
+        initSearch.putIndex("document", "search-test/document-index.json");
+        initSearch.putIndexTemplate("document", "search-test/document-index-template.json");
+        initSearch.flush("document");
+
+        // test multiple search in one app
+        search = config(SearchConfig.class, "other");
+        search.host("localhost");
+        search.type(TestDocument.class);
     }
 }

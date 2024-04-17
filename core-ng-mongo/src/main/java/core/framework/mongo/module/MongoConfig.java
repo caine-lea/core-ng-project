@@ -1,11 +1,13 @@
 package core.framework.mongo.module;
 
 import com.mongodb.ConnectionString;
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.module.ShutdownHook;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.module.ReadinessProbe;
+import core.framework.internal.module.ShutdownHook;
 import core.framework.mongo.Mongo;
 import core.framework.mongo.MongoCollection;
+import core.framework.mongo.impl.MongoConnectionPoolMetrics;
 import core.framework.mongo.impl.MongoImpl;
 import core.framework.util.Types;
 
@@ -27,8 +29,14 @@ public class MongoConfig extends Config {
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
         this.name = name;
-        mongo = createMongo();
+
+        var mongo = new MongoImpl();
+        mongo.metrics = new MongoConnectionPoolMetrics(name);
+        this.context.startupHook.initialize.add(mongo::initialize);
+        this.context.shutdownHook.add(ShutdownHook.STAGE_6, timeout -> mongo.close());
+        context.collector.metrics.add(mongo.metrics);
         context.beanFactory.bind(Mongo.class, name, mongo);
+        this.mongo = mongo;
     }
 
     @Override
@@ -38,19 +46,21 @@ public class MongoConfig extends Config {
             throw new Error("mongo is configured but no collection/view added, please remove unnecessary config, name=" + name);
     }
 
-    private MongoImpl createMongo() {
-        var mongo = new MongoImpl();
-        context.startupHook.add(mongo::initialize);
-        context.shutdownHook.add(ShutdownHook.STAGE_7, timeout -> mongo.close());
-        return mongo;
-    }
-
     public void uri(String uri) {
         if (this.uri != null) throw new Error(format("mongo uri is already configured, name={}, uri={}, previous={}", name, uri, this.uri));
         var connectionString = new ConnectionString(uri);
         if (connectionString.getDatabase() == null) throw new Error("uri must have database, uri=" + uri);
         mongo.uri = connectionString(connectionString);
+        addProbe(context.probe, connectionString);
         this.uri = uri;
+    }
+
+    void addProbe(ReadinessProbe probe, ConnectionString connectionString) {
+        if (!connectionString.isSrvProtocol()) {
+            // mongodb+srv protocol is generally used by Mongo Atlas, as DNS seed list
+            // readiness probe is mainly used by self-hosting mongo within kube, no need to check dns with srv
+            probe.hostURIs.add(connectionString.getHosts().get(0));
+        }
     }
 
     ConnectionString connectionString(ConnectionString uri) {
@@ -61,22 +71,16 @@ public class MongoConfig extends Config {
         mongo.poolSize(minSize, maxSize);
     }
 
-    public void slowOperationThreshold(Duration threshold) {
-        mongo.slowOperationThreshold(threshold);
-    }
-
-    public void tooManyRowsReturnedThreshold(int threshold) {
-        mongo.tooManyRowsReturnedThreshold = threshold;
-    }
-
     public void timeout(Duration timeout) {
         mongo.timeout(timeout);
     }
 
-    public <T> void collection(Class<T> entityClass) {
+    public <T> MongoCollection<T> collection(Class<T> entityClass) {
         if (uri == null) throw new Error("mongo uri must be configured first, name=" + name);
-        context.beanFactory.bind(Types.generic(MongoCollection.class, entityClass), name, mongo.collection(entityClass));
+        MongoCollection<T> collection = mongo.collection(entityClass);
+        context.beanFactory.bind(Types.generic(MongoCollection.class, entityClass), name, collection);
         entityAdded = true;
+        return collection;
     }
 
     public <T> void view(Class<T> viewClass) {

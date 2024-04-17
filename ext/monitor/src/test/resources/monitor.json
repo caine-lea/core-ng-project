@@ -1,0 +1,34 @@
+{
+  "redis": {
+    "session": {
+      "hosts": ["session-0.session"],
+      "highMemUsageThreshold": 0.8
+    }
+  },
+  "es": {
+    "log": {
+      "host": "log-es-0.log-es",
+      "highHeapUsageThreshold": 0.7,
+      "highDiskUsageThreshold": 0.7
+    }
+  },
+  "kafka": {
+    "log": {
+      "hosts": ["log-kafka-0.log-kafka"],
+      "highHeapUsageThreshold": 0.7,
+      "highDiskSizeThreshold": 50000000000
+    }
+  },
+  "mongo": {
+    "mongo": {
+      "host": "mongo-0.mongo",
+      "highDiskUsageThreshold": 0.7
+    }
+  },
+  "kube": {
+    "namespaces": ["ops", "app"]
+  },
+  "api": {
+    "services": ["https://website"]
+  }
+}

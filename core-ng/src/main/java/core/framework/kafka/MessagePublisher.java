@@ -1,16 +1,15 @@
 package core.framework.kafka;
 
-import java.util.UUID;
+import javax.annotation.Nullable;
 
 /**
  * @author neo
  */
 public interface MessagePublisher<T> {
+    // kafka uses sticky partitioning if key is null, refer to org.apache.kafka.clients.producer.internals.DefaultPartitioner
     default void publish(T value) {
-        publish(UUID.randomUUID().toString(), value);
+        publish(null, value);
     }
 
-    void publish(String key, T value);
-
-    void publish(String topic, String key, T value);
+    void publish(@Nullable String key, T value);
 }

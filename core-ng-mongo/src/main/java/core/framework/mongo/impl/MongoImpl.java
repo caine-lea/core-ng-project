@@ -2,19 +2,23 @@ package core.framework.mongo.impl;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.connection.ClusterSettings;
 import com.mongodb.connection.ConnectionPoolSettings;
 import com.mongodb.connection.SocketSettings;
-import core.framework.impl.log.LogManager;
+import core.framework.internal.log.LogManager;
 import core.framework.mongo.Collection;
 import core.framework.mongo.Mongo;
 import core.framework.mongo.MongoCollection;
 import core.framework.util.StopWatch;
+import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
+import org.bson.conversions.Bson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,42 +32,50 @@ public class MongoImpl implements Mongo {
     final EntityCodecs codecs = new EntityCodecs();
     private final Logger logger = LoggerFactory.getLogger(MongoImpl.class);
     private final ConnectionPoolSettings.Builder connectionPoolSettings = ConnectionPoolSettings.builder()
-                                                                                                .maxConnectionIdleTime((int) Duration.ofMinutes(30).toMillis(), TimeUnit.MILLISECONDS);
+        .maxConnectionIdleTime(Duration.ofMinutes(30).toMillis(), TimeUnit.MILLISECONDS);
+
     public ConnectionString uri;
-    public int tooManyRowsReturnedThreshold = 2000;
-    int timeoutInMs = (int) Duration.ofSeconds(15).toMillis();
-    long slowOperationThresholdInNanos = Duration.ofSeconds(5).toNanos();
+    public MongoConnectionPoolMetrics metrics;
+
+    long timeoutInMs = Duration.ofSeconds(15).toMillis();
     CodecRegistry registry;
     private MongoClient mongoClient;
     private MongoDatabase database;
 
+    // initialize will be called in startup hook, no need to synchronize
     public void initialize() {
-        registry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), codecs.codecRegistry());
-        database = createDatabase(registry);
+        // mongo client could be used by test context directly (e.g. get bean(Mongo.class) then init data)
+        // to handle initializing multiply times, this is still better than lazy initialize for prod runtime env
+        if (database == null) {
+            // put our own codec before mongo default codec, as override mongo default enum codec, refer to com.mongodb.MongoClientSettings.DEFAULT_CODEC_REGISTRY
+            registry = CodecRegistries.fromRegistries(codecs.codecRegistry(), MongoClientSettings.getDefaultCodecRegistry());
+            database = createDatabase(registry);
+        }
     }
 
-    MongoDatabase createDatabase(CodecRegistry registry) {
+    private MongoDatabase createDatabase(CodecRegistry registry) {
         if (uri == null) throw new Error("uri must not be null");
         String database = uri.getDatabase();
         if (database == null) throw new Error("uri must have database, uri=" + uri);
         var watch = new StopWatch();
         try {
             connectionPoolSettings.maxWaitTime(timeoutInMs, TimeUnit.MILLISECONDS); // pool checkout timeout
+            if (metrics != null) connectionPoolSettings.addConnectionPoolListener(metrics);
             var socketSettings = SocketSettings.builder()
-                                               .connectTimeout(timeoutInMs, TimeUnit.MILLISECONDS)
-                                               .readTimeout(timeoutInMs, TimeUnit.MILLISECONDS)
-                                               .build();
+                .connectTimeout(5, TimeUnit.SECONDS)    // use 5s as connect timeout, usually mongo db is within vpc network, doesn't need long connect timeout
+                .readTimeout((int) timeoutInMs, TimeUnit.MILLISECONDS)
+                .build();
             var clusterSettings = ClusterSettings.builder()
-                                                 .serverSelectionTimeout(timeoutInMs * 3, TimeUnit.MILLISECONDS)    // able to try 3 servers
-                                                 .build();
+                .serverSelectionTimeout(timeoutInMs * 3, TimeUnit.MILLISECONDS)    // able to try 3 servers
+                .build();
             var settings = MongoClientSettings.builder()
-                                              .applicationName(LogManager.APP_NAME)
-                                              .codecRegistry(registry)
-                                              .applyToConnectionPoolSettings(builder -> builder.applySettings(connectionPoolSettings.build()))
-                                              .applyToSocketSettings(builder -> builder.applySettings(socketSettings))
-                                              .applyToClusterSettings(builder -> builder.applySettings(clusterSettings))
-                                              .applyConnectionString(uri)
-                                              .build();
+                .applicationName(LogManager.APP_NAME)
+                .codecRegistry(registry)
+                .applyToConnectionPoolSettings(builder -> builder.applySettings(connectionPoolSettings.build()))
+                .applyToSocketSettings(builder -> builder.applySettings(socketSettings))
+                .applyToClusterSettings(builder -> builder.applySettings(clusterSettings))
+                .applyConnectionString(uri)
+                .build();
             mongoClient = MongoClients.create(settings);
             return mongoClient.getDatabase(database);
         } finally {
@@ -80,12 +92,58 @@ public class MongoImpl implements Mongo {
     }
 
     @Override
+    public void createIndex(String collection, Bson keys, IndexOptions options) {
+        var watch = new StopWatch();
+        try {
+            database.getCollection(collection).createIndex(keys, options);
+        } finally {
+            logger.info("createIndex, collection={}, keys={}, options={}, elapsed={}", collection, keys, options, watch.elapsed());
+        }
+    }
+
+    @Override
+    public void dropIndex(String collection, Bson keys) {
+        boolean deleted = false;
+        var watch = new StopWatch();
+        try {
+            database.getCollection(collection).dropIndex(keys);
+            deleted = true;
+        } catch (MongoCommandException e) {
+            if (!"IndexNotFound".equals(e.getErrorCodeName())) {    // only ignore index not found error
+                throw e;
+            }
+        } finally {
+            logger.info("dropIndex, collection={}, keys={}, deleted={}, elapsed={}", collection, keys, deleted, watch.elapsed());
+        }
+    }
+
+    @Override
     public void dropCollection(String collection) {
         var watch = new StopWatch();
         try {
-            database().getCollection(collection).drop();
+            database.getCollection(collection).drop();
         } finally {
             logger.info("dropCollection, collection={}, elapsed={}", collection, watch.elapsed());
+        }
+    }
+
+    @Override
+    public Document runCommand(Bson command) {
+        var watch = new StopWatch();
+        try {
+            return database.runCommand(command);
+        } finally {
+            logger.info("runCommand, command={}, elapsed={}", command, watch.elapsed());
+        }
+    }
+
+    @Override
+    public Document runAdminCommand(Bson command) {
+        var watch = new StopWatch();
+        try {
+            return mongoClient.getDatabase("admin").runCommand(command);
+        } finally {
+            logger.info("runAdminCommand, command={}, elapsed={}", command, watch.elapsed());
         }
     }
 
@@ -95,7 +153,7 @@ public class MongoImpl implements Mongo {
     }
 
     public final void timeout(Duration timeout) {
-        timeoutInMs = (int) timeout.toMillis();
+        timeoutInMs = timeout.toMillis();
     }
 
     public <T> MongoCollection<T> collection(Class<T> entityClass) {
@@ -119,17 +177,8 @@ public class MongoImpl implements Mongo {
         }
     }
 
-    public void slowOperationThreshold(Duration threshold) {
-        slowOperationThresholdInNanos = threshold.toNanos();
-    }
-
     <T> com.mongodb.client.MongoCollection<T> mongoCollection(Class<T> entityClass) {
         Collection collection = entityClass.getDeclaredAnnotation(Collection.class);
-        return database().getCollection(collection.name(), entityClass);
-    }
-
-    private MongoDatabase database() {
-        if (database == null) initialize(); // lazy init for dev/test, initialize will be called in startup hook on server env
-        return database;
+        return database.getCollection(collection.name(), entityClass);
     }
 }

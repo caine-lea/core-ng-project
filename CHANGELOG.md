@@ -1,325 +1,501 @@
 ## Change log
-### 6.10.4 (11/29/2018 - 12/3/2018) !!! kafka producer compression changes only works with kafka 2.1.0+
-* kafka: update COMPRESSION_TYPE_CONFIG to ZSTD, requires kafka 2.1.0 on server side
-* app: support to use APP_NAME or -Dcore.appName to override appName, to support deploy same image/app with different name (multi tenancy)
-* elasticsearch: added ElasticSearchMigration to support migration
 
-### 6.10.3 (11/24/2018 - 11/29/2018)
-* search: update es to 6.5.1
-* kafka: update kafka to 2.1.0
-* redis: multGet values return in same order of keys
-* httpclient: add custom DNS support to solve DNS pollution issue
+### 9.0.9 (3/20/2024 - )
 
-### 6.10.1 (11/16/2018 - 11/23/2018)
-* kafka: set consumer client.id for monitoring
-* api: change typescript api nullable definition to "type | null", to make it stricter
-* httpclient: update okHTTP to 3.12.0
+* mysql: updated and patched to 8.3.0, fixed CJException should be wrapped as SQLException
+  > make sure use "core.framework.mysql:mysql-connector-j:8.3.0-r2"
+* thread: replace all synchronized with ReentrantLock/Condition, including RateControl/ShutdownHandling/Test
+* http: convert some http error as warning
+  > undertow "UT000133: Request did not contain an Upgrade header, upgrade is not permitted"
+  > "response was sent, discard the current http transaction"
+* search: update es to 8.13
 
-### 6.10.0 (10/18/2018 - 11/16/2018) 
-* httpclient: use okHTTP as implementation to support http/2.0 
-              added connectTimeout, as for internal api or external page fetching, it requires different settings
-* executor: shutdown executor in 2 steps, as there may multiple executors
-            support submit task with delay, to support application retry task, to avoid sleep during task execution
-* http: shutdown http server at last, to accept incoming request during shutdown
-        enabled HTTP2 support 
-        disabled "always write keep alive response header", since it's default for HTTP/1.1
-        HTTP/1.0 client is less popular, for apache benchmark tool (ab), use alternative one (e.g. h2load from nghttp2, which will be installed with curl+http2 support)   
-* db: close connection if query timed out, refer to core.framework.impl.db.Connections for reason
-* mongo: replaced fongo with mongo-java-server, update driver to 3.9.0
-* kafka: update to 2.0.1
-* search: update es to 6.5.0
-* log-processor: changed timefield from date to @timestamp, as default value for timelion or visualization builder
+### 9.0.8 (1/29/2024 - 3/7/2024)
 
-### 6.9.6 (10/16/2018 - 10/18/2018)
-* log: collect cpu usage stat, in container env, system load != cpu container/java process usage
-* http: changed Response.empty() return 200 status code 
-        due to jdk httpclient bug, it hangs if server return 204 no content, without content-length, see https://bugs.openjdk.java.net/browse/JDK-8211437  
+* kafka: update to 3.7.0
+  > update kafka docker demo with official image, refer to docker/kafka/docker-compose.yml
+* message: change message listener FAILED_TO_STOP from warning to error
+* executor: tweak shutdown handling, print all tasks not complete
+* jre: published neowu/jre:21.0.2
+* db: validate enum must have @Property for json field List<Enum>
+  > to make it consistent with JSON serialization and ensure refactoring safety
+* search: update es to 8.12.2
+  > the JDK 21.0.2 issue is fixed
+* virtualThread: update jdk.virtualThreadScheduler.parallelism to cpu * 8
+* httpClient: revert okIO back to 3.2.0
+  > okIO 3.3.0 may cause virtual thread deadlock with Http2Writer
+  > will wait to see if future version JVM or okHTTP fix the issue
+* undertow: revert back to 2.3.10
+  > undertow 2.3.11 has memory leak issue with virtual thread, will keep eye on it
+  > https://github.com/undertow-io/undertow/commit/c96363d683feb4b1066959d46be59cf2d59a7b7c
 
-### 6.9.5 (10/16/2018)
-* http: disable http2 for both server and client, as jdk http client may cause busy loop issue if transaction is not proper closed
+!!! okIO issue
+https://github.com/square/okio/commit/f8434f575787198928a26334758ddbca9726b11c#diff-f63e8920e14cc4bf376a495cfcd1fbfa2eee7bbcdfec0ad10f2bc51237c59725
+for some reason, Http2Writer.flush (synchronized) -> AsyncTimeout$Companion.cancelScheduledTimeout (changed to reentrantLock)
+triggered VirtualThreads.park, make all other virtual threads which share same http2connection deadlocked
 
-### 6.9.4 (10/11/2018 - 10/15/2018)
-* util: removed InputStreams, with JDK 11, inputStream added readAllBytes() method to read all bytes
-* httpclient: support gzip content-type
+```
+#20985 "kafka-listener-19336" virtual
+      java.base/jdk.internal.misc.Unsafe.park(Native Method)
+      java.base/java.lang.VirtualThread.parkOnCarrierThread(Unknown Source)
+      java.base/java.lang.VirtualThread.park(Unknown Source)
+      java.base/java.lang.System$2.parkVirtualThread(Unknown Source)
+      java.base/jdk.internal.misc.VirtualThreads.park(Unknown Source)
+      java.base/java.util.concurrent.locks.LockSupport.park(Unknown Source)
+      java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(Unknown Source)
+      java.base/java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(Unknown Source)
+      java.base/java.util.concurrent.locks.ReentrantLock$Sync.lock(Unknown Source)
+      java.base/java.util.concurrent.locks.ReentrantLock.lock(Unknown Source)
+      okio.AsyncTimeout$Companion.cancelScheduledTimeout(AsyncTimeout.kt:273)
+      okio.AsyncTimeout$Companion.access$cancelScheduledTimeout(AsyncTimeout.kt:204)
+      okio.AsyncTimeout.exit(AsyncTimeout.kt:62)
+      okio.AsyncTimeout$sink$1.write(AsyncTimeout.kt:341)
+      okio.RealBufferedSink.flush(RealBufferedSink.kt:268)
+      okhttp3.internal.http2.Http2Writer.flush(Http2Writer.kt:120)
+      okhttp3.internal.http2.Http2Connection.flush(Http2Connection.kt:408)
+      okhttp3.internal.http2.Http2Stream$FramingSink.close(Http2Stream.kt:624)
+      okio.ForwardingSink.close(ForwardingSink.kt:37)
+      okhttp3.internal.connection.Exchange$RequestBodySink.close(Exchange.kt:247)
+      okio.RealBufferedSink.close(RealBufferedSink.kt:287)
 
-### 6.9.3 (10/8/2018 - 10/11/2018)
-* log: update slfj4 to 1.8, which switched to service provider model to bind logger factory and added java module support
-* httpClient: fix keep alive timeout setting
+// rest similar threads are all locked      
+#20984 "kafka-listener-19335" virtual
+      okhttp3.internal.http2.Http2Connection.newStream(Http2Connection.kt:240)
+      okhttp3.internal.http2.Http2Connection.newStream(Http2Connection.kt:225)
+      okhttp3.internal.http2.Http2ExchangeCodec.writeRequestHeaders(Http2ExchangeCodec.kt:76)
+      okhttp3.internal.connection.Exchange.writeRequestHeaders(Exchange.kt:63)
+#20974 "kafka-listener-19325" virtual
+      okhttp3.internal.http2.Http2Writer.flush(Http2Writer.kt:119)
+      okhttp3.internal.http2.Http2Connection.flush(Http2Connection.kt:408)
+      okhttp3.internal.http2.Http2Stream$FramingSink.close(Http2Stream.kt:624)
+      okio.ForwardingSink.close(ForwardingSink.kt:37)
+      okhttp3.internal.connection.Exchange$RequestBodySink.close(Exchange.kt:247)
+      okio.RealBufferedSink.close(RealBufferedSink.kt:287)
+      okhttp3.internal.http.CallServerInterceptor.intercept(CallServerInterceptor.kt:63)
+      okhttp3.internal.http.RealInterceptorChain.proceed(RealInterceptorChain.kt:109)
+  #20995 "kafka-listener-19346" virtual
+      okhttp3.internal.http2.Http2Writer.data(Http2Writer.kt:150)
+      okhttp3.internal.http2.Http2Connection.writeData(Http2Connection.kt:332)
+      okhttp3.internal.http2.Http2Stream$FramingSink.emitFrame(Http2Stream.kt:565)
+      okhttp3.internal.http2.Http2Stream$FramingSink.close(Http2Stream.kt:612)
+      okio.ForwardingSink.close(ForwardingSink.kt:37)
+      okhttp3.internal.connection.Exchange$RequestBodySink.close(Exchange.kt:247)
+      okio.RealBufferedSink.close(RealBufferedSink.kt:287)      
+```
 
-### 6.9.2 (10/3/2018 - 10/8/2018)
-* httpClient: tweak request/response to make it more low level style, 
-* api: refined query param bean behavior, empty value will be treated as null, refer to core.framework.impl.web.bean.QueryParamMapper 
-* management: added /_sys/vm, /_sys/thread, /_sys/heap to provide more detailed diagnostic info (similar result of jcmd) 
+### 9.0.5 (1/10/2024 - 1/29/2024)
 
-### 6.9.1 (10/3/2018)
-* httpClient: fix bug on shouldRetry
+* json: update jackson to 2.16.1
+  > refer to https://cowtowncoder.medium.com/jackson-2-16-rc1-overview-55dbb90c22d9
+* mysql: updated and patched to 8.3.0
+  > use "core.framework.mysql:mysql-connector-j:8.3.0-r2"
+* db: support azure IAM auth
+  > azure mysql flexible server supports IAM service account auth, to use access token instead of user/password
+  > set db user to "iam/azure" to use azure iam auth
+* search: update es to 8.12.0, switch es module repo to codelibs
+  > !!! integration test breaks with JDK 21.0.2 (even with old version of es lib), refer to https://github.com/elastic/elasticsearch/pull/104347
+  > !!! to run with JDK 21.0.2, workaround is to create EsExecutors.java and apply the fix locally
+  > !!! add codelib maven repo to project
 
-### 6.9.0 (9/24/2018 - 10/2/2018)    !!! only support java 11 !!!
-* jdk: update to java 11 
-* log: internal tweaking, make logParam be aware of max param length, consume less memory with large trace log
-* db: removed test initDB().runScript(), since in real life we always prefer to use repository(), as refactor/entity typing/validation reason, script can still be achieved by calling database directly 
-* util: !!! renamed Strings.isEmpty to Strings.isBlank to match jdk 11
-* validation: !!! renamed @NotEmpty to @NotBlank to match jdk 11 naming convention 
-* httpClient: replaced apache httpClient with JDK builtin impl 
+```kotlin
+maven {
+    url = uri("https://maven.codelibs.org/")
+    content {
+        includeGroup("org.codelibs.elasticsearch.module")
+    }
+}
+```
 
-### 6.8.5 (9/20/2018 - 9/24/2018)   
-* db: log params for batch operations, disable ssl for mysql
-* log: adjust logger name abbr, only leave last 2 tokens for long package
-* log: reduce trace log, only log thread/date once at beginning, replace timestamp with duration in nanos
-* log-processor: removed id in action/trace, redundant with "_id"
+### 9.0.4 (12/20/2023 - 1/9/2024)
 
-### 6.8.4 (9/18/2018 - 9/20/2018)  !!! action log format changed, please use latest log-processor, docker: neowu/log-processor:6.8.4 !!! 
-* http: not setting Date response header as it's not necessary
-* util: delete some methods of Files, not too useful in cloud env 
-* api: for api ts definition change LocalDateTime/LocalDate to string type
-* log: renamed old refId to correlationId, and now refId is for directly reference action, bulk message handler now logs all clients/correlationIds/refIds 
+* jre: published neowu/jre:21.0.1
+* mysql: aggressively simplified mysql jdbc driver, removed unused features
+  > add slow query support, decoupled core-ng and mysql classes
+  > must use "core.framework.mysql:mysql-connector-j:8.2.0-r3"
 
-### 6.8.3 (9/13/2018 - 9/18/2018)
-* http: removed request.pathParam/request.queryParam, for type safety, we use api interface/impl, so only keep low level interface to keep flexibility 
-* http: path param now only supports string/integer/long/enum
-* kafka: bulk message handler logs all message in trace for troubleshooting 
-* api: webservice client generates more efficient code for dynamic path pattern
+### 9.0.3 (12/12/2023 - 12/19/2023)
 
-### 6.8.2 (9/10/2018 - 9/13/2018)
-* http: change framework bad request error code to "INVALID_HTTP_REQUEST" 
-* db: changed db().defaultIsolationLevel() to db().isolationLevel(), and if specified, isolation level will be set on connection creation, rather than before every transaction started (to avoid unnecessary db operation)
-* api: webservice client logs the calling method, tweak http client logging
+* kafka: updated client to 3.6.1
+* db: tweaked datetime related operations for virtual thread
+  > use new date api if possible, mysql driver uses too many locks/sync for old Date/Timestamp impl
+  > it recommends to map MySQL column type: LocalDate -> DATE, LocalDateTime -> DATETIME(6), ZonedDateTime -> TIMESTAMP(6)
+  > with Timestamp, in mysql console, it is easier to use "SET @@session.time_zone" to adjust datetime value displayed
+* mysql: updated mysql driver according to profiling result
+  > use "core.framework.mysql:mysql-connector-j:8.2.0-r2"
+  > simplified and tuned used code path
 
-### 6.8.1 (9/6/2018 - 9/10/2018)
-* http: make ip access check as built in logic, to deny before routing check (which may return not found or method not allowed)
-* api: added api().bean(beanClass) for raw request/response/ws bean
-* util: removed Exceptions.error(), use new Error(Strings.format()) instead, which is more straightforward and code analyzer friendly (easier to check whether hide root cause) 
+### 9.0.2 (12/7/2023 - 12/12/2023)
 
-### 6.8.0 (9/5/2018 - 9/6/2018)  !!! api cleanup, remove replaceable method  !!!
-* session: removed session.remove(key), just use session.set(key, null)
-* redis: log returned value
-* validator: log bean if failed to validate, to help troubleshooting
-* http: removed module config, route(), replaced with http().route(method,path,controller)
-* http: mask json response, beanBody/httpClient
+* stats: dump virtual threads on high cpu
+* http: response "connection: keep-alive" header if client sends keep-alive header
+  > to be compatible with http/1.0 client, like ab (apache benchmark) with "-k"
+* mysql: patched mysql jdbc driver to support virtual thread and gcloud auth
+  > use "core.framework.mysql:mysql-connector-j:8.2.0"
+  > !!! for db-migration, pls continue to use "com.mysql:mysql-connector-j:8.2.0", as our patched version may remove unused features
+  > refer to https://github.com/neowu/mysql-connector-j
+  > refer to https://bugs.mysql.com/bug.php?id=110512
 
-### 6.7.1 (8/31/2018 - 9/5/2018)
-* http: set tcp keep alive timeout to 620s, to adapt to both AWS ELB and gcloud LB
-* http: move graceful shutdown logic into IO thread, and not count as action, before reading request 
-* http: process health-check in IO thread        
-* log-processor: fix index template should use strict_date_optional_time as date format
-* ws: draft websocket impl
-* api: tweak api client retry, shorten keep alive timeout, and retry on socketException (for connection reset)
+### 9.0.1 (12/01/2023 - 12/7/2023)
 
-### 6.7.0 (8/23/2018 - 8/31/2018)   !!! search API break changes !!!
-* db: skip query.fetch() if limit is 0
-* search: update to 6.4.0, 
-    !!! removed @Index(index, type), replaced with @Index(name) as multiple types per index is deprecated and will be removed in ES 7.0
-    switched to java high level client, which uses HTTP:9200
-    removed DeleteByQuery, as no actual usage for now, can be substituted by ForEach if needed
-* cache: support evict and put multiple keys, change keys to Collection<String>, since in real case, keys usually are constructed from List<String> or Set<String>
-* kafka: removed /_sys kafka admin support, for actual cases, it's still better use kafka provided scripts
+* thread: updated default virtual thread scheduler parallelism to at least 16
+  > jdbc is not fully supported virtual thread yet, allow more virtual thread unfriendly tasks to run parallel
+  > refer to https://bugs.mysql.com/bug.php?id=110512
+* kafka: updated kafka listener to virtual thread, increased default concurrency to cpu * 16
+  > now only 1 thread is pulling messages, and dispatched to {concurrency} threads
+* thread: track virtual thread count
+* http: use virtual thread to replace undertow worker pool
 
-### 6.6.7 (8/20/2018 - 8/23/2018)
-* log-processor: change index pattern to name-yyyy.MM.dd, to make clean index job works with metricbeats
-* utils: deleted core.framework.util.Charsets, in favor of java.nio.charset.StandardCharsets (as IDE prompts)
+### 9.0.0 (09/01/2023 - 12/01/2023) !!! updated to Java 21
 
-### 6.6.6 (8/18/2018 - 8/20/2018)
-* kafka: tweak producer, added request rate/size metrics, enable compression
+* kafka: updated client to 3.6.0
+* search: update es to 8.11.1
+* executor: removed executor config, provide builtin Executor binding, backed by virtual thread
+  > virtual thread doesn't support currentThreadCPUTime, thus if in virtual thread, action.cpu_time won't be tracked
+* sys: add "_sys/thread/virtual" diagnostic controller to print virtual thread dump
+  > refer to https://openjdk.org/jeps/444 for more info about virtual thread
+* mongo: update driver to 4.11.0
+  > improved for virtual thread, https://www.mongodb.com/docs/drivers/java/sync/current/whats-new/#std-label-version-4.11
+* mysql: update driver to 8.2.0
 
-### 6.6.5 (8/15/2018 - 8/17/2018)   !!! minor API name changes, compile should fix !!! 
-* log: make log-processor leverage built-in kafak support, to index action as well
-* redis,mongo,elasticserch: fix forEach elapsed time tracking 
-* redis: replace setnx with set command
+(pmd only support java 21 from 7.0, and 7.0/gradle pmd 7.0 support is not released yet, refer to https://github.com/gradle/gradle/issues/24502)
 
-### 6.6.4 (8/9/2018 - 8/15/2018)
-* kafka: update to 2.0.0
-* redis: check values must not be empty in encoding
-* log: remove track debug log to make trace log concise 
+### 8.1.6 (07/24/2023 - 08/16/2023)
 
-### 6.6.3 (8/9/2018 - 8/9/2018)
-* redis: support List
+* mysql: update driver to 8.1.0
+* kafka: updated client to 3.5.1
+* search: update es to 8.9.0
 
-### 6.6.2 (8/8/2018 - 8/8/2018)
-* db: support batchExecute
+### 8.1.5 (06/22/2023 - 07/10/2023)
 
-### 6.6.1 (8/5/2018 - 8/7/2018)
-* search: support update by script 
-* http: update undertow to 2.0.11
+* kafka: updated client to 3.5.0
+* gradle: updated test dependency and kotlin DSL
+  > prepare for gradle 9.0
+* mongo: update driver to 4.10.1
 
-### 6.6.0 (7/31/2018 - 8/5/2018)   !!! check break changes !!!
-* db: !!! replaced repository.update with repository.partialUpdate(), repository.update will update all fields and field can be NULL 
-* search: update to 6.3.2
-* util: removed Lists.newArrayList(...values)/Sets.newHashSet(...values)/Maps.newHashMap(k,v) in favor of JDK 10 builtin List/Set/Map.of/copyOf
-* html: !!! changed Message.get(key) to return String rather than Optional<String>, and throw error if key not existed, to make it more strict
+### 8.1.4 (06/05/2023 - 06/13/2023)
 
-### 6.5.2 (7/26/2018 - 7/30/2018)
-* kafka: update to 1.1.1
-* db: fix SQLParams may throw exception which cause action log failed to send
+* redis: supports SortedSet.increaseScoreBy()
+* mongo: set connect timeout to 5s
+* search: update es to 8.8.1
+* search: set connect timeout to 5s
+  > generally es is within same network, it doesn't need long connect timeout in order to fail fast
+* kafka: updated client to 3.4.1
+* http: updated okhttp to 4.11.0
 
-### 6.5.1 (7/7/2018 - 7/12/2018)
-* template: support data url in html template
-* validation: if bean has default value, it requires to put @NotNull (this may break, review all request/response, and run unit test to verify)
-* web: query param mapper ignore not existed keys, in order to support default value in query bean  
+### 8.1.3 (05/21/2023 - 06/04/2023)
 
-### 6.5.0 (7/3/2018 - 7/4/2018)
-due to removed support List<T> as request/response type
-* web: request.bean must pass class type 
-* validation: remove support to validate top level List<T> 
-* validation: converted core.framework.impl.validate.ValidationException as internal exception, to treat as internal error, in application level, use BadRequestException instead
-* webservice: validate response bean on both controller and webserviceClient 
-* json: removed Optional<T> support and jackson dependency, as only use case of Optional<T> is responseType
-* test: renamed methods in core.framework.test.Assertions, to avoid conflicting with assertj 
+* search: support es cloud
+  > es host can be configured as full uri, e.g. http://es-0.es, or https://es-0.es:9200
+  > added searchConfig.auth(apiKeyId, apiKeySecret)
+* kibana: support es cloud
+  > configure auth via: app.kibana.apiKey, sys.elasticsearch.apiKeyId, sys.elasticsearch.apiKeySecret
+* api: support create api client with custom httpclient
+  > removed api().httpClient(), pass custom built httpClient into api.client() instead
 
-### 6.4.2 (6/28/2018 - 7/3/2018)
-* site: !!! updated csp design, allow to specify entire csp to keep maximum flexibility, this is due to difficulty of external sdk integration, e.g. facebook, ga  
-        use site().security().csp(csp) or sys.webSecurity.csp to configure, site().security() will enable rest headers without csp          
-* sys: validate keys in sys.properties
-* api: removed support List<T> as request/response due to security concerns
+### 8.1.2 (05/08/2023 - 05/16/2023)
 
-### 6.4.1 (6/26/2018 - 6/27/2018)
-* api: added api().httpClient() to configure http client for api client, and potentially support local experiment code to call website/interface directly 
-* api: retry on NoHttpResponseException with non-idempotent methods, trade off for availability/complexity, best result we can get with keep-alive + graceful shutdown + retry   
+* search: fixed ElasticSearchLogInterceptor logging issue with chunked http entity
+  > failed to generate trace log with bulkIndex
+* search: fixed default max conn settings
+* search: updated default timeout to 15s
+  > tolerant more when es is busy
+* db: update mysql driver to 8.0.33
+* json: update jackson to 2.15.0
 
-### 6.4.0 (6/24/2018 - 6/25/2018)
-* session: !!! redis session key changed from "sessionId:{id}" to "sessionId:{sha256(id)}" for security reason, so the redis log won't show clear text session id value, 
-        update lib will lose all existing user session, please deploy on scheduled time
-* httpClient: added retry support, refer to core.framework.internal.http.RetryHandler for details
-        make API client to retry (in kube env, persistent connection can be stale during deployment)
+### 8.1.1 (03/14/2023 - 04/03/2023)
 
-### 6.3.7 (6/21/2018 - 6/24/2018)
-* api: make RemoteServiceException exposes https status
-* site: make default error handler fits most of cases to reduce the need of creating custom error handler 
-* make http server / scheduler / kafka listener / executor shutdown gracefully 
-* httpClient: added DefaultServiceUnavailableRetryStrategy, enable evictIdleConnections 
+* ws: response corresponding close-code on connect according to exception
+* httpClient: disabled okHTTP built-in followup and http-to-https redirect
+  > those behavior should be impl on application level to have complete trace
+* scheduler: trigger job via /_sys/job links refId and correlationIds
+* search: update es to 8.7.0
 
-### 6.3.6 (6/14/2018 - 6/21/2018)
-* api: assert same service interface must not have duplicate method name
-* search: update to 6.3.0, add analysis-common plugin for stemmer support during test
+### 8.1.0 (02/21/2023 - 03/09/2023)
 
-### 6.3.5 (6/13/2018 - 6/14/208)
-* executor: support to submit void task as syntax sugar
-* api: tweak enum generation to use JAVA_ENUM_NAME: "PROPERTY_VALUE" pattern
+* ws: update perf stats to track bytes read/write, similar like http client
+* log: updated ws_active_channels, http_active_requests visualization
+  > max -> split by host -> stacked
+* ws: onMessage/onClose dispatched to task pool
+* ws: websocket abnormal closure will trigger onClose event
 
-### 6.3.4 (6/4/2018 - 6/13/2018)
-* db: added db().batchSize() to configure batch size on batchInsert and batchDelete
-* db: enable rewriteBatchedStatements=true for MySQL
-* api: retire old /_sys/api, promote v2
-* test: replace EnumConversionValidator/EnvResourceValidator with assertJ extension, added validator assertions, refer to core.framework.test.Assertions
+### 8.0.13 (02/08/2023 - 02/21/2023)
 
-### 6.3.3 (5/28/2018 - 6/4/2018)
-* api: make error message more friendly when service response returns value type
-* api: add validation to prevent from using same simple class name for service interface and request/response bean, in order to improve maintainability and simplify API typescript definition generation  
-* api: added /_sys/api/v2 for new version of api definition exposing (client js will read json and generate client code directly)
-* db: fix sql params log should log @DBEnumValue value instead of enum.name()
+* ws: add "ws_active_channels" stats
+* kafka: update to 3.4.0
+* ws: allow to provide custom rate limit config for ws connecting
+  > use http().limitRate().add(WebSocketConfig.WS_OPEN_GROUP, ...)
+* mongo: update driver to 4.9.0
 
-### 6.3.2 (5/22/2018 - 5/28/2018)
-* site: finalize csp design, make img-src supports data:, use sys.webSecurity.trustedSources to configure 
-* http: update undertow to 2.0.9
-* search: support auto complete
+### 8.0.12 (01/18/2023 - 02/07/2023)
 
-### 6.3.1 (5/16/2018 - 5/22/2018)
-* site: update site.enableWebSecurity(String... trustedSources) to use CSP to replace x-frame-options since it's deprecated 
-* executor: tweak use case when task submit another task to executor, to support async long polling or retry use cases 
+* hash: removed hmac md5/sha1, hash.sha1 support
+  > not used anymore
+* monitor: added mongo monitor
+* ws: add rate limit on ws connect
+  > establish wss connection is expensive, especially won't be able to reuse http conn pool from LB
+  > by default only allow to create 10 connections every 30s
+* db: update mysql driver to 8.0.32
+* kafka: update to 3.3.2
 
-### 6.3.0 (5/9/2018 - 5/15/2018)
-* http: update undertow to 2.0.7
-* api: make error message more friendly when service method param misses @PathParam
-* config: make Config class stateful, use override style to configure during test
-* search: !!! moved search to core-ng-search/core-ng-search-test modules, use config(SearchConfig.class)/config(InitSearchConfig.class) to configure, refer to log-processor gradle config for dependency config 
-* mongo: !!! moved mongo to core-ng-mongo/core-ng-mong-test modules, use config(MongoConfig.class) to configure
-* db: Query added fetchOne()
+### 8.0.11 (01/10/2023 - 01/17/2023)
 
-### 6.2.2 (5/3/2018)
-* scheduler: log error when trigger returned invalid next execution time
+* mongo: update MongoMigration with 1 hour timeout
+  > index creation on large collection could take long
+* mongo: added runAdminCommand, and enhanced MongoMigration to support get properties easier
+  > make it easier to determine env, and run different command
+* mongo: not checking dns if mongodb+srv protocol
+  > srv protocol is mainly used by mongo atlas, the readiness probe is mainly for self-hosting mongo in kube cluster
+* mongo: added dropIndex() for migration
+* search: update es to 8.6.0
 
-### 6.2.0 (4/25/2018 - 5/1/2018)        !!! only support Java 10+
-* thread: removed core.framework.util.Threads.availableProcessors, since java 10 supports cpu limits well in docker/kube
-* db: update connection max idle timeout to 1 hour, to fit most scenario (e.g. IDC with firewall)  
-* scheduler: removed secondly trigger, replaced with custom trigger to make it more flexible
-* search: update es to 6.2.4 
-* executor: !!! removed built-in Executor binding, please use executor().add(); in config to keep same behavior, 
-            allow executor().add(name, poolSize) to create multiple pools
+### 8.0.10 (12/13/2022 - 01/04/2023)
 
-### 6.1.5 (4/19/2018)
-* bug: fix site().publishAPI(cidrs) not setting cidr correctly
+* log: remove APP_LOG_FILTER_CONFIG from log-processor
+  > not really useful in practice, log system should be designed to be capable of persisting massive data
+* db: updated pool.maxIdleTime from 1 hour to 2 hours
+  > with cloud auth, metadata service could be down during GKE control plane updating (zonal GKE only, not regional GKE)
+  > increase maxIdleTime will hold db connection longer and improve efficiency of db pool, especially in cloud env, there is no firewall between app and db
+* mongo: update driver to 4.8.1
+* search: improved ForEach validation and clear scroll error handling
+* http: use actual body length as stats.response_body_length
 
-### 6.1.4 (4/16/2018 - 4/17/2018)
-* kafka: added POST /_sys/kafka/topic/:topic/message/:messageId, to allow publish message thru internal management API
-* bug: fix array param format 
-* bug: fix multiple kafka management controller conflict  
+### 8.0.9 (11/09/2022 - 12/12/2022)
 
-### 6.1.2/6.1.3 (4/9/2018 - 4/16/2018)
-* site: added publishAPI() / sys.site.publishAPI.allowCIDR to allow access /sys/_api from trusted network 
-* kafka: update to 1.1.0, add management controller method to increase partition/delete records 
-* search: update es to 6.2.3
-* db: add query.project()
+* json: update jackson to 2.14.0
+* html: HTMLTemplate supports data uri
+* http: tweaked websocket handling, support more close code
+* log: finalize log-exporter design
 
-### 6.1.1 (4/4/2018 - 4/9/2018)
-* action: simplify actionId naming scheme, since actionId doesn't need to be used in path anymore
-          examples: action=api:patch:/ajax/product/:id, action=http:get:/, action=topic:some-topic, action=job:some-job  
-* api: typescript definition generates string enum
+### 8.0.8 (10/10/2022 - 11/09/2022)
 
-### 6.1.0 (3/7/2018 - 4/4/2018)
-* kafka: update to 1.0.1, add config to register publisher without topic (instead of passing null)
-* http: update undertow to 2.0.3
-* log: log masking redesign, only customer data from form param/json body require masking
-       mask sessionId value in cookies log
-       !!! removed CustomMessageFilter, replace with masked field to simplify usage 
+* ext: update log-collector default sys.http.maxForwardedIPs to 2
+  > to keep consistent with framework default values, use ENV to override if needed
+* http: if x-forwarded-for header has more ip than maxForwardedIPs, put x-forwarded-for in action log context
+  > for request passes thru http forward proxy, or x-forwarded-for spoofing, log complete chain for troubleshooting
+* http: handle http request with empty path
+  > browser or regular http client won't send empty path, only happens with raw http request sending by low level client
+* http: update undertow to 2.3.0
+* db: update mysql driver to 8.0.31
+  > mysql maven group updated, it is 'com.mysql:mysql-connector-j:8.0.31'
+* log: update slf4j api to 2.0.3
+* log: added log-exporter to upload log to google storage
+  > as archive, or import to big query for OLAP
+  > currently only support gs://, support other clouds if needed in future
+* search: update es to 8.5.0
+  > es 8.5.0 has bug to break monitor, https://github.com/elastic/elasticsearch/issues/91259, fixed by 8.5.3
 
-### 6.0.0 (3/4/2018 - 3/6/2018)     !!! only support Java 9+
-* jdk: drop java 8 support
-* log: removed write action/trace to file, updated sys.properties log key to sys.log.appender
-        sys.log.appender=console => write action/trace to console
-        sys.log.appender=kafkaURI => forward log to kafka
-       (in cloud env, console logging is preferred no matter it's docker or systemd/journald, or use log forwarding) 
-* http: update undertow to 2.0.1
+### 8.0.7 (09/23/2022 - 10/05/2022)
 
-### 5.3.8 (2/28/2018 - 3/4/2018)    !!! 5.3.X is last version to support Java 8
-* http: limit max requestURL length to 1000
-* search: update es to 6.2.2
+* ext: updated dockerfile for security compliance
+  > in order to enable kube "securityContext.runAsNonRoot: true", docker image should use numeric user (UID)
+* monitor: fixed kafka high disk alert message
+  > kafka disk usage uses size as threshold, alert message should convert to percentage
+* log-processor: support action log trace filter
+  > to filter out trace to reduce storage, e.g. under massive scanning
+* kafka: update to 3.3.1
+  > kraft mode is production ready
 
-### 5.3.7 (2/24/2018 - 2/27/2018)
-* http: not handling /health-check as action anymore, means /health-check will not be part of action log, to reduce noisy in kube env
-* httpClient: removed HTTPRequest static method shortcut, use new HTTPRequest(method, uri) instead, to enforce consistent api style 
-* api: tweak api generation
+### 8.0.6 (08/16/2022 - 09/23/2022)
 
-### 5.3.6 (2/14/2018 - 2/20/2018)
-* redis: support increaseBy
-* api: tweak api generation to fit client impl, refer to https://github.com/neowu/frontend-demo-project/blob/master/website-frontend-ts/src/service/user.ts as example
+* log-processor: always use bulk index, to simplify
+  > ES already unified bulk index / single index thread pool, there is only one "write" pool
+  > refer to https://www.elastic.co/guide/en/elasticsearch/reference/current/modules-threadpool.html
+* http: update undertow to 2.2.19
+* search: update es to 8.4.1
+* db: support json column via @Column(json=true)
+  > syntax sugar to simplify custom getter and setter to convert between String column and Bean
+* kafka: update to 3.2.3
+* mongo: json @Property should not be used on mongo entity class
+  > same like db, view and entity should be separated
+* db: mysql jdbc driver updated to 8.0.30
 
-### 5.3.5 (2/12/2018 - 2/14/2018)
-* inject: bind(object) will inject object, to make it easier to register bean with both manual wired and autowired dependencies
-* properties: removed support of loading properties from file path, for kube we will using env/jvm argument overriding
-* httpClient: add basic auth support
-* search: update es to 6.2.1
+### 8.0.5 (07/28/2022 - 08/15/2022)
 
-### 5.3.4 (2/5/2018 - 2/11/2018)
-* http: add ContentType.IMAGE_PNG constant, (e.g. used by captcha controller)
-* api: change returned content type to javascript, make it easier to view by browser
-* test: removed core.framework.test.EnvWebValidator, since all static file/content will be handled in frontend project, copy the impl to your own project if you still need
-* http: set max entity size to 10M, to prevent from large post body
-* http: support text/xml as body
-* http: change ip whitelist to cidr to support subnet
+* mock: fixed MockRedis.list().range(), with negative start or stop
+  > only impact unit test
+* mongo: update driver to 4.7.1
+* kafka: update to 3.2.1
+* kafka: removed KafkaConfig.publish(messageClass) without topic support
+  > it proved not useful to support dynamic topic, topic better be designed like table, prefer static naming / typing over dynamic
+  > if really need something like request/replay, fan-in / fan-out pattern, still can be implemented in explicit way
+* monitor: monitoring kafka topic/message type changes
+* mongo: improve entity decoding
+  > use switch to replace if on field matching
 
-### 5.3.3 (2/1/2018 - 2/4/2018)
-* api: support configure api client timeout and slow operation threshold (default is 30s and 15s)
-* log: add redis read/write entries tracking, index read/write entries as null if not set  
-* search: update es to 6.1.3
-* api: add "_sys/api" to return typescript definition, used by frontend
+### 8.0.4 (07/10/2022 - 07/27/2022)
 
-### 5.3.2 (1/29/2018 - 2/1/2018)
-* html: added "autofocus", "allowfullscreen", "hidden" & "async" to boolean attributes
-* api: remove openapi impl, not useful in actual development life cycle, we plan to impl tool to generate typescript ajax client from interface directly 
-* api: temporary removed: update API client with 30s timeout and 15s slow operation threshold (will support configure in next version)
+* log-collector: stricter request validation
+* mongo: add connection pool stats metrics
+* db: add experimental postgresql support
+  > many new db products use postgres compatible driver, e.g. GCloud AlloyDB, CockroachDB
+  > PostgreSQL lacks of many features we are using with MySQL, 1. affected rows, 2. QueryInterceptor to track no index used sql
+* search: clear ForEach scroll once process done
+* http: update undertow to 2.2.18
+* search: update es to 8.3.2
+* kafka: mark LONG_CONSUMER_DELAY as error if delay is longer than 15 mins
+  > currently MAX_POLL_INTERVAL_MS_CONFIG = 30 mins, larger delay will trigger rebalance and message resending
+  > system should be designed to process polling messages fast
 
-### 5.3.1 (1/28/2018 - 1/29/2018)
-* search: update es to 6.1.2
-* html: added "required", "sortable" to boolean attributes
+### 8.0.3 (06/22/2022 - 07/08/2022)
 
-### 5.3.0 (1/22/2018 - 1/23/2018)
-* http: added gzip support, added cache param for static content 
-* api: update API client with 30s timeout and 15s slow operation threshold
+* mongo: update driver to 4.6.0
+* warning: removed @DBWarning, replaced with @IOWarning
+  > e.g. @IOWarning(operation="db", maxOperations=2000, maxElapsedInMs=5000, maxReads=2000, maxTotalReads=10_000, maxTotalWrites=10_000)
+* kafka: updated default long consumer delay threshold from 60s to 30s
+* mongo: supports BigDecimal (map to mongo Decimal128 type)
+* mongo: supports LocalDate (map to String)
+* monitor: for critical errors, use 1 min as timespan (only send one alert message per min for same kind error)
+  > in reality, ongoing critical error may flush slack channel, 1 min timespan is good enough to bring attention, and with lesser messages
+* redis: supports SortedSet.remove()
 
-### 5.2.10 (1/15/2018 - 1/17/2018)
-* http: support ip whitelist(due to gcloud public LB does not support ingress IP restriction), update undertow to 1.4.22
-* db: change mysql jdbc driver to com.mysql.cj.jdbc.Driver (works with mysql:mysql-connector-java:6.0.6), old one is deprecated, https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-api-changes.html
-* test: update junit to 5.0.3 and tweak dependency
+### 8.0.2 (06/02/2022 - 06/17/2022) !!! @DBWarning is replaced with @IOWarning on 8.0.3, better upgrade to next version
 
-### 5.2.9 (12/26/2017 - 1/10/2018)
-* search: update es to 6.1.1
-* http: support patch method, for partial update webservice, e.g. update status for one entity
+* db: redesign db max operations, removed Database.maxOperations(), introduced @DBWarning
+  > one service may mix multiple type of workload, some could be async and call db many times while others API needs to be sync and responsive
+  > with new design, it allows to specify warning threshold in granular level
+  > currently @DBWarning only support Controller/WS method, MessageHandler method, and executor task inherits from parent @DBWarning
+* db: reduced default LONG_TRANSACTION threshold from 10s to 5s, log commit/rollback elapsed time
+
+### 8.0.0 (05/19/2022 - 05/31/2022)  !!! breaking changes
+
+* json: expose JSONMapper.builder() method to allow app create its own JSON parser
+  > e.g. to parse external json with custom DeserializationFeature/MapperFeature
+* search: add validation, document class must not have default values
+  > with partialUpdate, it could override es with those default values
+* search: update and partialUpdate return if target doc is updated
+  > refer to https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-update.html#_detect_noop_updates
+* log-processor: action forward supports ignoring actions
+* db: query.count() and query.projectOne() honor sort/skip/limit   !!! behavior changed !!!
+  > repository.select() is designed to be syntax sugar, to make it easier to construct single table SQL (ORM is not design goal)
+  > since it supports groupBy() projectOne() project(), now we removed all customized rules, it degraded to plain SQL builder
+  > if you uses query.count(), it's better not set skip/limit/orderBy before that
+  > with this, projection works as intended, e.g. query.limit(1); query.projectOne("col1, col2", View.class); results in "select col1, col2 from table limit 1"
+
+### 7.10.8 (05/16/2022 - 05/19/2022)
+
+* log-processor: action forward supports by result
+  > e.g. only forward OK actions
+* json: disabled ALLOW_COERCION_OF_SCALARS, to make it stricter
+  > thru JSONMapper.disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+  > previously, [""] will convert [null] if target type is List<Integer>
+* search: put detailed error in SearchException
+* kafka: update to 3.2.0
+* db: query.project() renamed to query.projectOne(), added query.project() to return List<View> !!!
+  > should be easy to fix with compiler errors
+
+### 7.10.7 (04/29/2022 - 05/12/2022)
+
+* log-collector: make http().maxForwardedIPs() read property "sys.http.maxForwardedIPs"
+  > so it can be configured by env
+* stats: replace cpu usage with JDK built-in OperatingSystemMXBean.getProcessCpuLoad()
+  > since jdk 17, java is aware of container, refer to https://developers.redhat.com/articles/2022/04/19/java-17-whats-new-openjdks-container-awareness
+* rate-limit: update rate control config api to make it more intuitive
+  > e.g. add("group", 10, 5, Duration.ofSeconds(1)) keeps 10 permits at most, fills 5 permits every second
+  > e.g. add("group", 20, 10, Duration.ofMinutes(5)) keeps 20 permits at most, fills 10 permits every 5 minutes
+* search: added retryOnConflict on UpdateRequest to handle
+* search: added partialUpdate
+* db: mysql jdbc driver updated to 8.0.29 !!! framework depends on mysql api, must use matched jdbc driver
+* search: update es to 8.2.0
+
+### 7.10.6 (04/19/2022 - 04/28/2022)
+
+* db: tweak gcloud iam auth provider expiration time, make CancelQueryTaskImpl be aware of gcloud auth provider
+* db: tweak query timeout handling
+  > increase db socket timeout, to make MySQL cancel timer (CancelQueryTaskImpl) has more room to kill query
+* http: update undertow to 2.2.17
+  > UNDERTOW-2041 Error when X-forwarded-For header contains ipv6 address with leading zeroes
+  > UNDERTOW-2022 FixedLengthStreamSourceConduit must overwrite resumeReads
+* monitor: collect ES cpu usage
+  > added highCPUUsageThreshold in monitor es config
+* httpClient: verify hostname with trusting specific cert !!! behavior changed, check carefully
+  > previously, HTTPClient.builder().trust(CERT) will use empty hostname verifier
+  > now, only trustAll() will bypass hostname verifying, so right now if you trust specific cert, make sure you have CN/ALT_NAME matches the dns name (wildcard domain name also works)
+* httpClient: retry aware of maxProcessTime
+  > for short circuit, e.g. heavy load request causes remote service busy, and client timeout triggers more retry requests, to amplify the load
+* es: support refresh on bulk request
+  > to specify whether auto refresh after bulk request
+* es: added timeout in search/complete request
+* es: added DeleteByQuery
+* es: added perf trace for elasticSearch.refreshIndex
+* monitor: treat high disk usage as error
+  > disk full requires immediate attention to expand
+* action: use id as correlationId for root action
+  > to make kibana search easier, e.g. search by correlationId will list all actions
+  > log-processor action diagram also simplified
+
+### 7.10.5 (04/01/2022 - 04/14/2022)
+
+* search: truncate es request log
+  > bulk index request body can be huge, to reduce heap usage
+* db: support gcloud IAM auth
+  > gcloud mysql supported IAM service account auth, to use access token instead of user/password
+  > set db user to "iam/gcloud" to use gcloud iam auth
+* monitor: add retry on kube client
+  > to reduce failures when kube cluster upgrades by cloud
+* http: removed http().httpPort() and http().httpsPort(), replaced with http().listenHTTP(host) and http().listenHTTPS(host)
+  > replaced sys.http.port, sys.https.port with sys.http.listen and sys.https.listen
+  > host are in "host:port" format, e.g. 127.0.0.1:8080 or 8080 (equivalent to 0.0.0.0:8080)
+  > with cloud env, all envs have same dns/service name, so to simplify properties config, it's actually better to setup dns name to minic cloud in local
+  > e.g. set "customer-service" to 127.0.0.2 in local dns, and hardcode "https://customer-service" as customerServiceURL
+* log-collector: refer to above, use sys.http.listen and sys.https.listen env if needed
+* kafka: redesigned /_sys/ controller, now they are /_sys/kafka/topic/:topic/key/:key/publish and /_sys/kafka/topic/:topic/key/:key/handle
+  > publish is to publish message to kafka, visible to all consumers
+  > handle is to handle the message on the current pod, not visible to kafka, just call handler to process the message (manual recovery or replay message)
+
+### 7.10.4 (03/15/2022 - 03/31/2022)
+
+* maven: deleted old published version older than 7.9.0
+* redis: replaced ZRANGEBYSCORE with ZRANGE, requires redis 6.2 !!!
+* redis: for list.pop always use "LPOP count" to simplify, requires redis 6.2 !!!
+* redis: added RedisSortedSet.popMin
+* redis: improved RedisSortedSet.popByScore concurrency handling
+* kafka: collect producer kafka_request_size_max, collect kafka_max_message_size
+  > stats.kafka_request_size_max is from kafka producer metrics, which is compressed size (include key/value/header/protocol),
+  > broker size config "message.max.bytes" should be larger than this
+  > action.stats.kafka_max_message_size is uncompressed size of value bytes, (kafka().maxRequestSize() should be larger than this)
+* log-processor: added stat-kafka_max_message_size vis, added to kafka dashboard
+* log-processor: updated stat-kafka_request_size vis, added max request size
+* log: limit max size of actionLog.context() to 5000 for one key
+  > warn with "CONTEXT_TOO_LARGE" if too many context values
+* log: tweaked action log/trace truncation
+  > increased max request size to 2M
+  > check final action log json bytes before sending to log-kafka, if it's more than 2M, print log to console, and truncate context/trace
+  > with snappy compression, it's generally ok with broker message.max.bytes=1M
+  > in worst case, we can set log-kafka message.max.bytes=2M
+  > will review the current setup and potentially adjust in future
+
+### 7.10.3 (02/25/2022 - 03/14/2022)
+
+* db: fix: revert previous update UNEXPECTED_UPDATE_RESULT warning if updated row is 0
+* executor: log task class in trace to make it easier to find the corresponding code of executor task
+* log-processor: update action-* context dynamic index template to support dot in context key
+  > it's not recommended putting dot in action log context key
+* log-processor: kibana json updated for kibana 8.1.0
+  > TSVB metrics separate left axis bug fixed, so to revert GC diagrams back
+* search: update es to 8.1.0
+  > > BTW: ES cannot upgrade a node from version [7.14.0] directly to version [8.1.0], upgrade to version [7.17.0] first.
+* mongo: updated driver to 4.5.0
+  > removed mapReduce in favor of aggregate, it's deprecated by mongo 5.0  
+  > refer to https://docs.mongodb.com/manual/reference/command/mapReduce/#mapreduce
+
+### 7.10.2 (02/11/2022 - 02/23/2022)
+
+* scheduler: replaced jobExecutor with unlimited cached thread pool
+  > no impact with regular cases, normally scheduler-service in one application should only send kafka message
+  > this change is mainly to simplify test service or non-global jobs (e.g. no need to put real logic to Executors in Job)
+* jre: published neowu/jre:17.0.2
+* search: update es to 8.0.0
+  > Elastic dropped more modules from this version, now we have to include transport-netty4, mapper-extras libs
+  > and it doesn't provide standard way of integration test, refer to https://github.com/elastic/elasticsearch/issues/55258
+  > opensearch is doing opposite, https://mvnrepository.com/artifact/org.opensearch.plugin
+* db: updated batchInsertIgnore, batchUpsert, batchDelete return value from boolean[] to boolean
+  > this is drawback of MySQL thin driver, though expected behavior
+  > with batch insert ignore (or insert on duplicate key), MySQL thin driver fills entire affectedRows array with same value, java.sql.Statement.SUCCESS_NO_INFO if updated count > 0
+  > refer to com.mysql.cj.jdbc.ClientPreparedStatement.executeBatchedInserts Line 758
+  > if you need to know result for each entity, you have to use single operation one by one (Transaction may help performance a bit)
+* db: mysql jdbc driver updated to 8.0.28
+  > one bug fixed: After calling Statement.setQueryTimeout(), when a query timeout was reached, a connection to the server was established to terminate the query,
+  > but the connection remained open afterward. With this fix, the new connection is closed after the query termination. (Bug #31189960, Bug #99260)
+* known bugs:
+  > db, due to use affected rows (not found rows), if repository updates entity without any change, it warns with UNEXPECTED_UPDATE_RESULT, please ignore this, will fix in next version
+

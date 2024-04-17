@@ -12,10 +12,12 @@ import static core.framework.internal.json.JSONMapper.OBJECT_MAPPER;
  * @author neo
  */
 public final class JSON {
-    public static Object fromJSON(Type instanceType, String json) {
+    public static <T> T fromJSON(Type instanceType, String json) {
         try {
             JavaType javaType = OBJECT_MAPPER.getTypeFactory().constructType(instanceType);
-            return OBJECT_MAPPER.readValue(json, javaType);
+            T result = OBJECT_MAPPER.readValue(json, javaType);
+            if (result == null) throw new Error("invalid json value, value=" + json);   // not allow passing "null" as json value
+            return result;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -23,13 +25,16 @@ public final class JSON {
 
     public static <T> T fromJSON(Class<T> instanceClass, String json) {
         try {
-            return OBJECT_MAPPER.readValue(json, instanceClass);
+            T result = OBJECT_MAPPER.readValue(json, instanceClass);
+            if (result == null) throw new Error("invalid json value, value=" + json);   // not allow passing "null" as json value
+            return result;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
     public static String toJSON(Object instance) {
+        if (instance == null) throw new Error("instance must not be null");
         try {
             return OBJECT_MAPPER.writeValueAsString(instance);
         } catch (IOException e) {

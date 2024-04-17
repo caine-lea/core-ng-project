@@ -3,6 +3,7 @@ package core.framework.test.redis;
 import core.framework.redis.RedisSet;
 
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,7 +20,7 @@ public final class MockRedisSet implements RedisSet {
 
     @Override
     public long add(String key, String... values) {
-        assertThat(values).doesNotContainNull();
+        assertThat(values).isNotEmpty().doesNotContainNull();
         var setValue = store.putIfAbsent(key, new HashSet<>());
         Set<String> set = setValue.set();
         long addedValues = 0;
@@ -45,6 +46,7 @@ public final class MockRedisSet implements RedisSet {
 
     @Override
     public long remove(String key, String... values) {
+        assertThat(values).isNotEmpty().doesNotContainNull();
         var redisValue = store.get(key);
         if (redisValue == null) return 0;
         Set<String> set = redisValue.set();
@@ -53,5 +55,32 @@ public final class MockRedisSet implements RedisSet {
             if (set.remove(value)) removedValues++;
         }
         return removedValues;
+    }
+
+    @Override
+    public Set<String> pop(String key, long count) {
+        var redisValue = store.get(key);
+        if (redisValue == null) return Set.of();
+        Set<String> set = redisValue.set();
+
+        Set<String> results = new HashSet<>();
+        long removed = 0;
+        for (Iterator<String> iterator = set.iterator(); iterator.hasNext(); ) {
+            if (removed == count) break;
+
+            String item = iterator.next();
+            iterator.remove();
+            results.add(item);
+            removed++;
+        }
+
+        return Set.copyOf(results);
+    }
+
+    @Override
+    public long size(String key) {
+        var redisValue = store.get(key);
+        if (redisValue == null) return 0;
+        return redisValue.set().size();
     }
 }

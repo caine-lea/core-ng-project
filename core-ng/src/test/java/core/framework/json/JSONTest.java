@@ -3,13 +3,17 @@ package core.framework.json;
 import core.framework.util.Types;
 import org.junit.jupiter.api.Test;
 
+import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.time.chrono.ChronoZonedDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * @author neo
@@ -20,14 +24,18 @@ class JSONTest {
         var bean = new TestBean();
         bean.mapField.put("key1", "value1");
         bean.mapField.put("key2", "value2");
+        bean.enumMapField.put(TestBean.TestEnum.A, "A1");
+        bean.enumMapField.put(TestBean.TestEnum.B, "B1");
+        bean.mapListField.put("key1", List.of("v1"));
 
         String json = JSON.toJSON(bean);
-        assertThat(json).contains("\"map\":{\"key1\":\"value1\",\"key2\":\"value2\"}");
+        assertThat(json)
+            .contains("\"map\":{\"key1\":\"value1\",\"key2\":\"value2\"}")
+            .contains("\"enumMap\":{\"A1\":\"A1\",\"B1\":\"B1\"}")
+            .contains("\"listMap\":{\"key1\":[\"v1\"]}");
 
         var parsedBean = JSON.fromJSON(TestBean.class, json);
-        assertThat(parsedBean.mapField)
-                .containsEntry("key1", "value1")
-                .containsEntry("key2", "value2");
+        assertThat(parsedBean).usingRecursiveComparison().isEqualTo(bean);
     }
 
     @Test
@@ -37,13 +45,15 @@ class JSONTest {
         var child = new TestBean.Child();
         child.booleanField = Boolean.TRUE;
         child.longField = 200L;
+        child.doubleField = 2.3456;
         bean.childField = child;
 
         String json = JSON.toJSON(bean);
-        assertThat(json).contains("\"child\":{\"boolean\":true,\"long\":200}");
+        assertThat(json).contains("""
+            "child":{"boolean":true,"long":200,"double":2.3456}""");
 
         var parsedBean = JSON.fromJSON(TestBean.class, json);
-        assertThat(parsedBean).isEqualToComparingFieldByFieldRecursively(bean);
+        assertThat(parsedBean).usingRecursiveComparison().isEqualTo(bean);
     }
 
     @Test
@@ -60,10 +70,11 @@ class JSONTest {
         bean.childrenField.add(child2);
 
         String json = JSON.toJSON(bean);
-        assertThat(json).contains("\"list\":[\"value1\",\"value2\"],\"children\":[{\"boolean\":true,\"long\":null},{\"boolean\":false,\"long\":null}]");
+        assertThat(json).contains("""
+            "list":["value1","value2"],"children":[{"boolean":true,"long":null,"double":null},{"boolean":false,"long":null,"double":null}]""");
 
         TestBean parsedBean = JSON.fromJSON(TestBean.class, json);
-        assertThat(parsedBean).isEqualToComparingFieldByFieldRecursively(bean);
+        assertThat(parsedBean).usingRecursiveComparison().isEqualTo(bean);
     }
 
     @Test
@@ -73,11 +84,13 @@ class JSONTest {
         bean.dateTimeField = LocalDateTime.ofInstant(bean.instantField, ZoneId.systemDefault());
         bean.dateField = bean.dateTimeField.toLocalDate();
         bean.zonedDateTimeField = ZonedDateTime.ofInstant(bean.instantField, ZoneId.systemDefault());
+        bean.timeField = LocalTime.ofInstant(bean.instantField, ZoneId.systemDefault());
         String json = JSON.toJSON(bean);
 
         TestBean parsedBean = JSON.fromJSON(TestBean.class, json);
-        assertThat(parsedBean).isEqualToComparingOnlyGivenFields(bean, "instantField", "dateTimeField", "dateField");
-        assertThat(parsedBean.zonedDateTimeField).isEqualTo(bean.zonedDateTimeField);
+        assertThat(parsedBean).usingRecursiveComparison()
+            .withComparatorForType(ChronoZonedDateTime.timeLineOrder(), ZonedDateTime.class)
+            .isEqualTo(bean);
     }
 
     @Test
@@ -87,6 +100,33 @@ class JSONTest {
         assertThat(bean.dateField).isEqualTo("2018-05-10");
         assertThat(bean.dateTimeField).isEqualTo("2018-05-10T05:42:09.776");
         assertThat(bean.zonedDateTimeField).isEqualTo("2018-05-10T05:42:09.776Z");
+    }
+
+    @Test
+    void nanoFractionOfDateField() {
+        assertThat(JSON.toJSON(LocalDateTime.of(2019, 4, 25, 1, 0, 0, 200000000)))
+            .isEqualTo("\"2019-04-25T01:00:00.200\"");
+
+        assertThat(JSON.toJSON(LocalDateTime.of(2019, 4, 25, 1, 0, 0, 0)))
+            .isEqualTo("\"2019-04-25T01:00:00.000\"");
+
+        assertThat(JSON.toJSON(ZonedDateTime.of(2019, 4, 25, 1, 0, 0, 200000000, ZoneId.of("UTC"))))
+            .isEqualTo("\"2019-04-25T01:00:00.200Z\"");
+
+        assertThat(JSON.toJSON(ZonedDateTime.of(2019, 4, 25, 1, 0, 0, 0, ZoneId.of("UTC"))))
+            .isEqualTo("\"2019-04-25T01:00:00Z\"");
+
+        assertThat(JSON.toJSON(ZonedDateTime.of(2019, 4, 25, 1, 0, 0, 0, ZoneId.of("America/New_York"))))
+            .isEqualTo("\"2019-04-25T05:00:00Z\"");  // New york is UTC+5
+
+        assertThat(JSON.toJSON(LocalTime.of(18, 0)))
+            .isEqualTo("\"18:00:00.000\"");
+
+        assertThat(JSON.toJSON(LocalTime.of(18, 1, 2, 200000000)))
+            .isEqualTo("\"18:01:02.200\"");
+
+        assertThat(JSON.toJSON(LocalTime.of(18, 1, 2, 123456789)))
+            .isEqualTo("\"18:01:02.123456789\"");
     }
 
     @Test
@@ -102,8 +142,7 @@ class JSONTest {
 
     @Test
     void listObject() {
-        @SuppressWarnings("unchecked")
-        var beans = (List<TestBean>) JSON.fromJSON(Types.list(TestBean.class), "[{\"string\":\"n1\"},{\"string\":\"n2\"}]");
+        List<TestBean> beans = JSON.fromJSON(Types.list(TestBean.class), "[{\"string\":\"n1\"},{\"string\":\"n2\"}]");
 
         assertThat(beans).hasSize(2);
         assertThat(beans.get(0).stringField).isEqualTo("n1");
@@ -112,21 +151,13 @@ class JSONTest {
 
     @Test
     void nullObject() {
-        String json = JSON.toJSON(null);
-        TestBean bean = JSON.fromJSON(TestBean.class, json);
+        assertThatThrownBy(() -> JSON.fromJSON(TestBean.class, "null"))
+            .isInstanceOf(Error.class)
+            .hasMessageContaining("invalid json");
 
-        assertThat(bean).isNull();
-    }
-
-    @Test
-    void notAnnotatedField() {
-        var bean = new TestBean();
-        bean.notAnnotatedField = 100;
-        String json = JSON.toJSON(bean);
-        assertThat(json).contains("\"notAnnotatedField\":100");
-
-        TestBean parsedBean = JSON.fromJSON(TestBean.class, json);
-        assertThat(parsedBean).isEqualToComparingFieldByFieldRecursively(bean);
+        assertThatThrownBy(() -> JSON.toJSON(null))
+            .isInstanceOf(Error.class)
+            .hasMessageContaining("instance must not be null");
     }
 
     @Test
@@ -136,11 +167,15 @@ class JSONTest {
 
         assertThat(JSON.toEnumValue(TestBean.TestEnum.B)).isEqualTo("B1");
         assertThat(JSON.toEnumValue(TestBean.TestEnum.C)).isEqualTo("C");
+
+        // ordinal should be treated as invalid value
+        assertThatThrownBy(() -> JSON.fromEnumValue(TestBean.TestEnum.class, "0"))
+            .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void empty() {
-        TestBean bean = new TestBean();
+        var bean = new TestBean();
         bean.empty = new TestBean.Empty();
         String json = JSON.toJSON(bean);
         assertThat(json).contains("\"empty\":{}");
@@ -154,5 +189,20 @@ class JSONTest {
         TestBean bean = JSON.fromJSON(TestBean.class, "{}");
 
         assertThat(bean.defaultValueField).isEqualTo("defaultValue");
+    }
+
+    @Test
+    void invalidJSON() {
+        assertThatThrownBy(() -> JSON.fromJSON(TestBean.class, "{"))
+            .isInstanceOf(UncheckedIOException.class);
+
+        assertThatThrownBy(() -> JSON.fromJSON(Types.list(TestBean.class), "{"))
+            .isInstanceOf(UncheckedIOException.class);
+    }
+
+    @Test
+    void invalidInteger() {
+        assertThatThrownBy(() -> JSON.fromJSON(Integer.class, "\"\""))
+            .isInstanceOf(UncheckedIOException.class);
     }
 }

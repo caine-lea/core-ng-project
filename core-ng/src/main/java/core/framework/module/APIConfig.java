@@ -2,66 +2,64 @@ package core.framework.module;
 
 import core.framework.api.web.service.Path;
 import core.framework.http.HTTPClient;
-import core.framework.http.HTTPClientBuilder;
 import core.framework.http.HTTPMethod;
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.reflect.Classes;
-import core.framework.impl.web.bean.BeanMapperRegistry;
-import core.framework.impl.web.bean.RequestBeanMapper;
-import core.framework.impl.web.bean.ResponseBeanMapper;
-import core.framework.impl.web.controller.ControllerHolder;
-import core.framework.impl.web.service.HTTPMethods;
-import core.framework.impl.web.service.WebServiceClient;
-import core.framework.impl.web.service.WebServiceClientBuilder;
-import core.framework.impl.web.service.WebServiceControllerBuilder;
-import core.framework.impl.web.service.WebServiceImplValidator;
-import core.framework.impl.web.service.WebServiceInterfaceValidator;
+import core.framework.internal.inject.InjectValidator;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.web.bean.RequestBeanWriter;
+import core.framework.internal.web.bean.ResponseBeanReader;
+import core.framework.internal.web.controller.ControllerHolder;
+import core.framework.internal.web.service.HTTPMethods;
+import core.framework.internal.web.service.WebServiceClient;
+import core.framework.internal.web.service.WebServiceClientBuilder;
+import core.framework.internal.web.service.WebServiceControllerBuilder;
+import core.framework.internal.web.service.WebServiceImplValidator;
+import core.framework.internal.web.service.WebServiceInterfaceValidator;
 import core.framework.util.ASCII;
 import core.framework.web.Controller;
+import core.framework.web.service.WebServiceClientProxy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-
-import static core.framework.util.Strings.format;
 
 /**
  * @author neo
  */
 public class APIConfig extends Config {
-    final Map<String, Class<?>> serviceInterfaces = new HashMap<>();
-    final Set<Class<?>> beanClasses = new HashSet<>();     // extra beans not defined in service interfaces, e.g. web socket json, raw controller request/response
     private final Logger logger = LoggerFactory.getLogger(APIConfig.class);
-    private ModuleContext context;
-    private HTTPClientBuilder httpClientBuilder;
+    ModuleContext context;
     private HTTPClient httpClient;
+    private RequestBeanWriter writer;
+    private ResponseBeanReader reader;
 
     @Override
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
-        httpClientBuilder = new HTTPClientBuilder()
-                .userAgent(WebServiceClient.USER_AGENT)
-                .trustAll()
-                .connectTimeout(Duration.ofSeconds(2))
-                .timeout(Duration.ofSeconds(20))    // refer to: kube graceful shutdown period is 30s, db timeout is 15s
-                .slowOperationThreshold(Duration.ofSeconds(10))
-                .maxRetries(5);
+        // default value is for internal api call only, targeting for kube env (with short connect timeout and more retries)
+        httpClient = HTTPClient.builder()
+            .userAgent(WebServiceClient.USER_AGENT)
+            .trustAll()
+            .connectTimeout(Duration.ofSeconds(2))
+            .timeout(Duration.ofSeconds(20))    // refer to: kube graceful shutdown period is 30s, db timeout is 15s
+            .keepAlive(Duration.ofMinutes(5))   // use longer keep alive timeout within cluster, to reduce connection creation overhead
+            .slowOperationThreshold(Duration.ofSeconds(10))
+            .maxRetries(5)
+            .build();
+        writer = new RequestBeanWriter();
+        reader = new ResponseBeanReader();
     }
 
     public <T> void service(Class<T> serviceInterface, T service) {
-        if (!beanClasses.isEmpty()) throw new Error("api().service() must be configured before api().bean()");
-
         logger.info("create web service, interface={}", serviceInterface.getCanonicalName());
-        new WebServiceInterfaceValidator(serviceInterface,
-                context.httpServer.handler.requestBeanMapper,
-                context.httpServer.handler.responseBeanMapper).validate();
+        var validator = new WebServiceInterfaceValidator(serviceInterface, context.beanClassValidator);
+        validator.requestBeanReader = context.httpServer.handler.requestBeanReader;
+        validator.responseBeanWriter = context.httpServer.handler.responseBeanWriter;
+        validator.validate();
         new WebServiceImplValidator<>(serviceInterface, service).validate();
+        new InjectValidator(service).validate();
+        context.apiController.serviceInterfaces.add(serviceInterface);    // doesn't need to check duplicate, duplication will failed to register route
 
         for (Method method : serviceInterface.getMethods()) {
             HTTPMethod httpMethod = HTTPMethods.httpMethod(method);
@@ -77,48 +75,28 @@ public class APIConfig extends Config {
                 throw new Error("failed to find impl method", e);
             }
         }
-
-        Class<?> previous = serviceInterfaces.putIfAbsent(Classes.className(serviceInterface), serviceInterface);
-        if (previous != null) throw new Error(format("found service interface with duplicate name which can be confusing, please use different class name, previousClass={}, class={}", previous.getCanonicalName(), serviceInterface.getCanonicalName()));
     }
 
     public <T> APIClientConfig client(Class<T> serviceInterface, String serviceURL) {
-        logger.info("create web service client, interface={}, serviceURL={}", serviceInterface.getCanonicalName(), serviceURL);
-        RequestBeanMapper requestBeanMapper = context.httpServer.handler.requestBeanMapper;
-        ResponseBeanMapper responseBeanMapper = context.httpServer.handler.responseBeanMapper;
-        new WebServiceInterfaceValidator(serviceInterface, requestBeanMapper, responseBeanMapper).validate();
+        return client(serviceInterface, serviceURL, httpClient);
+    }
 
-        HTTPClient httpClient = getOrCreateHTTPClient();
-        var webServiceClient = new WebServiceClient(serviceURL, httpClient, requestBeanMapper, responseBeanMapper);
-        T client = createWebServiceClient(serviceInterface, webServiceClient);
+    public <T> APIClientConfig client(Class<T> serviceInterface, String serviceURL, HTTPClient httpClient) {
+        T client = createClient(serviceInterface, serviceURL, httpClient);
         context.beanFactory.bind(serviceInterface, null, client);
-        return new APIClientConfig(webServiceClient);
+        return new APIClientConfig((WebServiceClientProxy) client);
+    }
+
+    public <T> T createClient(Class<T> serviceInterface, String serviceURL, HTTPClient httpClient) {
+        logger.info("create web service client, interface={}, serviceURL={}", serviceInterface.getCanonicalName(), serviceURL);
+        var validator = new WebServiceInterfaceValidator(serviceInterface, context.beanClassValidator);
+        validator.requestBeanWriter = writer;
+        validator.responseBeanReader = reader;
+        validator.validate();
+        return createWebServiceClient(serviceInterface, new WebServiceClient(serviceURL, httpClient, writer, reader));
     }
 
     <T> T createWebServiceClient(Class<T> serviceInterface, WebServiceClient webServiceClient) {
         return new WebServiceClientBuilder<>(serviceInterface, webServiceClient).build();
-    }
-
-    public HTTPClientBuilder httpClient() {
-        if (httpClient != null) throw new Error("http client must be configured before adding client");
-        return httpClientBuilder;
-    }
-
-    private HTTPClient getOrCreateHTTPClient() {
-        if (httpClient == null) {
-            this.httpClient = httpClientBuilder.build();
-        }
-        return httpClient;
-    }
-
-    public void bean(Class<?>... beanClasses) {
-        BeanMapperRegistry registry = context.httpServer.handler.beanMapperRegistry;
-        for (Class<?> beanClass : beanClasses) {
-            if (registry.beanMappers.containsKey(beanClass)) {
-                throw new Error(format("bean class is already registered or referred by service interface, class={}", beanClass.getCanonicalName()));
-            }
-            registry.register(beanClass);
-            this.beanClasses.add(beanClass);
-        }
     }
 }

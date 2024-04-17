@@ -2,22 +2,27 @@ package core.framework.test;
 
 import core.framework.db.IsolationLevel;
 import core.framework.http.HTTPClient;
-import core.framework.http.HTTPClientBuilder;
 import core.framework.kafka.Message;
 import core.framework.scheduler.Job;
 import core.framework.test.db.TestDBEntity;
-import core.framework.test.db.TestSequenceIdDBEntity;
+import core.framework.test.db.TestDBEntityWithJSON;
+import core.framework.test.db.TestDBProjection;
+import core.framework.test.db.TestDBView;
 import core.framework.test.inject.TestBean;
 import core.framework.test.kafka.TestMessage;
 import core.framework.test.module.AbstractTestModule;
 import core.framework.test.scheduler.TestJob;
-import org.mockito.Mockito;
+import core.framework.test.web.TestWebService;
+import core.framework.test.web.TestWebServiceClientInterceptor;
 
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Optional;
+
+import static org.mockito.Mockito.mock;
 
 /**
  * @author neo
@@ -27,36 +32,46 @@ public class TestModule extends AbstractTestModule {
     protected void initialize() {
         loadProperties("test.properties");
 
-        overrideBinding(HTTPClient.class, Mockito.mock(HTTPClient.class));  // in test context, override binding is defined before actual binding
-        bind(HTTPClient.class, new HTTPClientBuilder().enableCookie().build());
+        load(new OverrideBeanTest());
+
+        overrideBinding(HTTPClient.class, mock(HTTPClient.class));  // in test context, override binding is defined before actual binding
+        bind(HTTPClient.class, HTTPClient.builder().maxRetries(3).retryWaitTime(Duration.ofSeconds(1)).enableCookie().enableFallbackDNSCache().build());
 
         configureDB();
         configureKafka();
+        configureRedis();
 
-        redis().host("localhost");
-
-        log().appendToKafka("localhost:9092");
+        log().appendToKafka("localhost");
 
         configureCache();
 
         configureHTTP();
         configureSite();
+        api().client(TestWebService.class, "https://localhost:8443").intercept(new TestWebServiceClientInterceptor());
 
         bind(new TestBean(requiredProperty("test.inject-test.property")));
 
         configureJob();
 
-        configureExecutor();
+        highCPUUsageThreshold(0.8);
+        highHeapUsageThreshold(0.8);
+        highMemUsageThreshold(0.8);
+
+        onShutdown(() -> {
+        });
+    }
+
+    private void configureRedis() {
+        redis().host("localhost");
+        redis().password("password");
+
+        redis("redis2").host("localhost");
     }
 
     private void configureCache() {
-        cache().redis("localhost");
-        cache().add(String.class, Duration.ofHours(6));
-    }
-
-    private void configureExecutor() {
-        executor().add(null, 1);
-        executor().add("name", 1);
+        cache().redis("localhost", "password");
+        cache().maxLocalSize(5000);
+        cache().add(TestDBEntity.class, Duration.ofHours(6));
     }
 
     private void configureSite() {
@@ -65,21 +80,28 @@ public class TestModule extends AbstractTestModule {
         site().session().cookie("SessionId", "localhost");
         site().cdn().host("//cdn");
         site().security().contentSecurityPolicy("default-src 'self' https://cdn; img-src 'self' https://cdn data:; object-src 'none'; frame-src 'none';");
-        site().publishAPI("0.0.0.0/0");
+        site().allowAPI(List.of("0.0.0.0/0"));
+        site().message(List.of("messages/messages.properties"));
     }
 
     private void configureHTTP() {
-        http().httpPort(8080);
-        http().httpsPort(8443);
+        http().listenHTTP("8080");
+        http().listenHTTPS("0.0.0.0:8443");
         http().gzip();
         http().maxForwardedIPs(2);
-        http().allowCIDR("0.0.0.0/0");
+        http().maxProcessTime(Duration.ofSeconds(30));
+        http().maxEntitySize(10000000);
+        http().access().allow(List.of("0.0.0.0/0"));
+        http().access().deny(List.of("10.0.0.0/24"));
+        http().errorHandler((request, e) -> Optional.empty());
     }
 
     private void configureKafka() {
-        kafka().uri("kafka://localhost:9092");
-        kafka().maxProcessTime(Duration.ofMinutes(30));
-        kafka().poolSize(1);
+        kafka().uri("localhost:9092");
+        kafka().maxRequestSize(2 * 1024 * 1024);
+        kafka().longConsumerDelayThreshold(Duration.ofSeconds(60));
+        kafka().concurrency(1);
+        kafka().groupId("test");
         kafka().publish("topic", TestMessage.class);
         kafka().subscribe("topic1", TestMessage.class, (List<Message<TestMessage>> messages) -> {
         });
@@ -91,23 +113,20 @@ public class TestModule extends AbstractTestModule {
         db().url("jdbc:mysql://localhost:3306/test");
         db().isolationLevel(IsolationLevel.READ_UNCOMMITTED);
         db().timeout(Duration.ofSeconds(10));
-        db().batchSize(7);
-        db().slowOperationThreshold(Duration.ofSeconds(5));
+        db().poolSize(5, 5);
         db().longTransactionThreshold(Duration.ofSeconds(5));
-        db().tooManyRowsReturnedThreshold(1000);
         db().repository(TestDBEntity.class);
+        db().repository(TestDBEntityWithJSON.class);
+        db().view(TestDBView.class);
+        db().view(TestDBProjection.class);
         initDB().createSchema();
-
-        db("oracle").url("jdbc:oracle:thin:@localhost:1521/test");
-        db().isolationLevel(IsolationLevel.READ_COMMITTED);
-        db("oracle").repository(TestSequenceIdDBEntity.class);
-        initDB("oracle").createSchema();
     }
 
     private void configureJob() {
         schedule().timeZone(ZoneId.of("UTC"));
         Job job = new TestJob();
         schedule().fixedRate("fixed-rate-job", job, Duration.ofSeconds(10));
+        schedule().hourlyAt("hourly-job", job, 30, 0);
         schedule().dailyAt("daily-job", job, LocalTime.NOON);
         schedule().weeklyAt("weekly-job", job, DayOfWeek.MONDAY, LocalTime.NOON);
         schedule().monthlyAt("monthly-job", job, 1, LocalTime.NOON);

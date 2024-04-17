@@ -1,7 +1,9 @@
 package core.framework.search;
 
+import core.framework.internal.module.PropertyManager;
+import core.framework.search.impl.ElasticSearchHost;
 import core.framework.search.impl.ElasticSearchImpl;
-import core.framework.util.Properties;
+import org.apache.http.HttpHost;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,22 +15,24 @@ import java.util.function.Consumer;
  */
 public class ElasticSearchMigration {
     private final Logger logger = LoggerFactory.getLogger(ElasticSearchMigration.class);
-    private final String host;
+    private final HttpHost[] hosts;
 
     public ElasticSearchMigration(String propertyFileClasspath) {
-        var properties = new Properties();
-        properties.load(propertyFileClasspath);
-        host = properties.get("sys.elasticsearch.host").orElseThrow();
+        var properties = new PropertyManager();
+        properties.properties.load(propertyFileClasspath);
+        String host = properties.property("sys.elasticsearch.host").orElseThrow();
+        hosts = ElasticSearchHost.parse(host);
     }
 
     public void migrate(Consumer<ElasticSearch> consumer) {
         var search = new ElasticSearchImpl();
         try {
-            search.host = host;
+            search.hosts = hosts;
             search.initialize();
             consumer.accept(search);
         } catch (Throwable e) {
             logger.error("failed to run migration", e);
+            throw e;
         } finally {
             close(search);
         }

@@ -1,14 +1,14 @@
 package core.framework.module;
 
 import core.framework.http.HTTPMethod;
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.web.http.IPAccessControl;
-import core.framework.impl.web.management.APIController;
-import core.framework.impl.web.site.StaticContentController;
-import core.framework.impl.web.site.StaticDirectoryController;
-import core.framework.impl.web.site.StaticFileController;
-import core.framework.impl.web.site.WebSecurityInterceptor;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.web.http.IPv4Ranges;
+import core.framework.internal.web.site.MessageImpl;
+import core.framework.internal.web.site.StaticContentController;
+import core.framework.internal.web.site.StaticDirectoryController;
+import core.framework.internal.web.site.StaticFileController;
+import core.framework.internal.web.site.WebSecurityInterceptor;
 import core.framework.web.site.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,10 +16,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
-
-import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -33,6 +30,7 @@ public class SiteConfig extends Config {
     @Override
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
+        context.httpServer.handler.requestParser.logSiteHeaders = true;
     }
 
     public SessionConfig session() {
@@ -45,12 +43,16 @@ public class SiteConfig extends Config {
 
     public void message(List<String> paths, String... languages) {
         if (messageConfigured) {
-            throw new Error("site message can only be configured once and must before adding template");
+            throw new Error("site().message() can only be configured once and must before adding template");
         }
         messageConfigured = true;
 
-        context.beanFactory.bind(Message.class, null, context.httpServer.siteManager.message);
         context.httpServer.siteManager.message.load(paths, languages);
+        context.beanFactory.bind(Message.class, null, message(context.httpServer.siteManager.message));
+    }
+
+    Message message(MessageImpl message) {
+        return message;
     }
 
     public void template(String path, Class<?> modelClass) {
@@ -58,10 +60,11 @@ public class SiteConfig extends Config {
         context.httpServer.siteManager.templateManager.add(path, modelClass);
     }
 
+    // this is only for POC or local testing, in cloud env, all static content should be served from LB + AWS S3/Google Storage/Azure Storage Account
     public StaticContentConfig staticContent(String path) {
         logger.info("add static content path, path={}", path);
         Path contentPath = context.httpServer.siteManager.webDirectory.path(path);
-        if (!Files.exists(contentPath, LinkOption.NOFOLLOW_LINKS)) throw new Error(format("path does not exist, path={}", path));
+        if (!Files.exists(contentPath, LinkOption.NOFOLLOW_LINKS)) throw new Error("path does not exist, path=" + path);
 
         StaticContentController controller;
         if (Files.isDirectory(contentPath)) {
@@ -77,15 +80,13 @@ public class SiteConfig extends Config {
     public WebSecurityConfig security() {
         if (webSecurityInterceptor == null) {
             webSecurityInterceptor = new WebSecurityInterceptor();
-            context.httpServer.handler.interceptors.add(webSecurityInterceptor);
+            context.httpServerConfig.interceptors.add(webSecurityInterceptor);
         }
         return new WebSecurityConfig(webSecurityInterceptor);
     }
 
-    public void publishAPI(String... cidrs) {
-        APIConfig config = context.config(APIConfig.class, null);
-
-        logger.info("publish typescript api definition, cidrs={}", Arrays.toString(cidrs));
-        context.route(HTTPMethod.GET, "/_sys/api", new APIController(config.serviceInterfaces, config.beanClasses, new IPAccessControl(cidrs)), true);
+    public void allowAPI(List<String> cidrs) {
+        logger.info("allow /_sys/api access, cidrs={}", cidrs);
+        context.apiController.accessControl.allow = new IPv4Ranges(cidrs);
     }
 }

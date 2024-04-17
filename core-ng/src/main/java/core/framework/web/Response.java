@@ -3,17 +3,16 @@ package core.framework.web;
 import core.framework.api.http.HTTPStatus;
 import core.framework.http.ContentType;
 import core.framework.http.HTTPHeaders;
-import core.framework.impl.web.response.BeanBody;
-import core.framework.impl.web.response.ByteArrayBody;
-import core.framework.impl.web.response.FileBody;
-import core.framework.impl.web.response.ResponseImpl;
-import core.framework.impl.web.response.TemplateBody;
-import core.framework.impl.web.response.TextBody;
+import core.framework.internal.web.response.BeanBody;
+import core.framework.internal.web.response.ByteArrayBody;
+import core.framework.internal.web.response.FileBody;
+import core.framework.internal.web.response.ResponseImpl;
+import core.framework.internal.web.response.TemplateBody;
+import core.framework.internal.web.response.TextBody;
 
+import javax.annotation.Nullable;
 import java.nio.file.Path;
 import java.util.Optional;
-
-import static core.framework.util.Strings.format;
 
 /**
  * @author neo
@@ -34,7 +33,7 @@ public interface Response {
         return html(templatePath, model, null);
     }
 
-    static Response html(String templatePath, Object model, String language) {
+    static Response html(String templatePath, Object model, @Nullable String language) {
         return new ResponseImpl(new TemplateBody(templatePath, model, language))
                 .contentType(ContentType.TEXT_HTML);
     }
@@ -61,7 +60,7 @@ public interface Response {
                 && redirectStatus != HTTPStatus.MOVED_PERMANENTLY
                 && redirectStatus != HTTPStatus.PERMANENT_REDIRECT
                 && redirectStatus != HTTPStatus.TEMPORARY_REDIRECT)
-            throw new Error(format("invalid redirect status, status={}", redirectStatus));
+            throw new Error("invalid redirect status, status=" + redirectStatus);
 
         return new ResponseImpl(new ByteArrayBody(new byte[0]))
                 .header(HTTPHeaders.LOCATION, url)
@@ -72,11 +71,13 @@ public interface Response {
 
     Response status(HTTPStatus status);
 
-    Response header(String name, Object value);
+    Optional<String> header(String name);
+
+    Response header(String name, @Nullable String value);
 
     Optional<ContentType> contentType();
 
     Response contentType(ContentType contentType);
 
-    Response cookie(CookieSpec spec, String value);
+    Response cookie(CookieSpec spec, @Nullable String value);
 }

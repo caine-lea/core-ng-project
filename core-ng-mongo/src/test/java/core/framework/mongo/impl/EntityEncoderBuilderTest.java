@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -39,19 +41,23 @@ class EntityEncoderBuilderTest {
 
     @Test
     void encode() {
-        assertThat(builder.enumCodecFields.keySet()).containsExactly(TestChildEntity.TestEnum.class);
+        assertThat(builder.enumCodecFields.keySet()).containsExactly(TestEnum.class);
 
-        TestEntity entity = new TestEntity();
+        var entity = new TestEntity();
         entity.id = new ObjectId("5627b47d54b92d03adb9e9cf");
         entity.booleanField = Boolean.TRUE;
         entity.longField = 325L;
+        entity.bigDecimalField = new BigDecimal("12.34");
         entity.stringField = "string";
         entity.zonedDateTimeField = ZonedDateTime.of(LocalDateTime.of(2016, 9, 1, 11, 0, 0), ZoneId.of("America/New_York"));
+        entity.dateField = LocalDate.of(2022, 7, 6);
         entity.child = new TestChildEntity();
-        entity.child.enumField = TestChildEntity.TestEnum.ITEM1;
-        entity.child.enumListField = List.of(TestChildEntity.TestEnum.ITEM2);
+        entity.child.enumField = TestEnum.ITEM1;
+        entity.child.enumListField = List.of(TestEnum.ITEM2);
         entity.listField = List.of("V1", "V2");
         entity.mapField = Map.of("K1", "V1", "K2", "V2");
+        entity.enumMapField = Map.of(TestEnum.ITEM1, "V1");
+        entity.mapListField = Map.of("K1", List.of("V1"), "K2", List.of("V2", "V3"));
 
         var bson = new BsonDocument();
         try (var writer = new BsonDocumentWriter(bson)) {

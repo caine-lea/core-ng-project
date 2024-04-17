@@ -1,7 +1,7 @@
 package core.framework.search.module;
 
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
 import core.framework.search.ElasticSearchType;
 import core.framework.search.impl.ElasticSearchTypeImpl;
 import core.framework.test.module.TestModuleContext;
@@ -19,14 +19,15 @@ public final class InitSearchConfig extends Config {
     protected void initialize(ModuleContext context, String name) {
         this.context = (TestModuleContext) context;
         config = this.context.getConfig(SearchConfig.class, null);
+        config.search.initialize(); // for es integration test, it usually calls putIndex, so to initialize before for once
     }
 
-    public void createIndex(String index, String sourcePath) {
-        config.search.createIndex(index, ClasspathResources.text(sourcePath));
+    public void putIndex(String index, String sourcePath) {
+        config.search.putIndex(index, ClasspathResources.text(sourcePath));
     }
 
-    public void createIndexTemplate(String name, String sourcePath) {
-        config.search.createIndexTemplate(name, ClasspathResources.text(sourcePath));
+    public void putIndexTemplate(String name, String sourcePath) {
+        config.search.putIndexTemplate(name, ClasspathResources.text(sourcePath));
     }
 
     @SuppressWarnings("unchecked")
@@ -35,6 +36,6 @@ public final class InitSearchConfig extends Config {
     }
 
     public void flush(String index) {
-        config.search.flushIndex(index);
+        config.search.refreshIndex(index);
     }
 }

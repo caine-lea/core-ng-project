@@ -1,12 +1,12 @@
 package core.framework.module;
 
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.module.ShutdownHook;
-import core.framework.impl.redis.RedisImpl;
-import core.framework.impl.resource.PoolMetrics;
-import core.framework.impl.web.session.LocalSessionStore;
-import core.framework.impl.web.session.RedisSessionStore;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.module.ShutdownHook;
+import core.framework.internal.redis.RedisImpl;
+import core.framework.internal.resource.PoolMetrics;
+import core.framework.internal.web.session.LocalSessionStore;
+import core.framework.internal.web.session.RedisSessionStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,7 +22,7 @@ public class SessionConfig extends Config {
     @Override
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
-        context.logManager.maskFields(context.httpServer.siteManager.sessionManager.sessionId.name);
+        cookie("SessionId", null);
     }
 
     public void timeout(Duration timeout) {
@@ -34,22 +34,28 @@ public class SessionConfig extends Config {
         context.logManager.maskFields(name);
     }
 
+    public void header(String name) {
+        context.httpServer.siteManager.sessionManager.header(name);
+        context.logManager.maskFields(name);
+    }
+
     public void local() {
-        logger.info("create local session provider");
+        logger.info("create local session store");
         LocalSessionStore sessionStore = new LocalSessionStore();
         context.backgroundTask().scheduleWithFixedDelay(sessionStore::cleanup, Duration.ofMinutes(30));
-        context.httpServer.siteManager.sessionManager.sessionStore(sessionStore);
+        context.httpServer.siteManager.sessionManager.store(sessionStore);
     }
 
     public void redis(String host) {
-        logger.info("create redis session provider, host={}", host);
+        logger.info("create redis session store, host={}", host);
 
         var redis = new RedisImpl("redis-session");
-        redis.host = host;
+        redis.host(host);
         context.backgroundTask().scheduleWithFixedDelay(redis.pool::refresh, Duration.ofMinutes(5));
-        context.stat.metrics.add(new PoolMetrics(redis.pool));
+        context.collector.metrics.add(new PoolMetrics(redis.pool));
 
-        context.shutdownHook.add(ShutdownHook.STAGE_7, timeout -> redis.close());
-        context.httpServer.siteManager.sessionManager.sessionStore(new RedisSessionStore(redis));
+        context.probe.hostURIs.add(host);
+        context.shutdownHook.add(ShutdownHook.STAGE_6, timeout -> redis.close());
+        context.httpServer.siteManager.sessionManager.store(new RedisSessionStore(redis));
     }
 }

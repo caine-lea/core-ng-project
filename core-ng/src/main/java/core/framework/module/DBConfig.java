@@ -1,15 +1,16 @@
 package core.framework.module;
 
-import core.framework.crypto.Password;
+import core.framework.db.CloudAuthProvider;
 import core.framework.db.Database;
 import core.framework.db.IsolationLevel;
 import core.framework.db.Repository;
-import core.framework.impl.db.DatabaseImpl;
-import core.framework.impl.db.Vendor;
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.module.ShutdownHook;
-import core.framework.impl.resource.PoolMetrics;
+import core.framework.internal.db.DatabaseImpl;
+import core.framework.internal.db.cloud.AzureAuthProvider;
+import core.framework.internal.db.cloud.GCloudAuthProvider;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.module.ShutdownHook;
+import core.framework.internal.resource.PoolMetrics;
 import core.framework.util.Lists;
 import core.framework.util.Types;
 
@@ -33,57 +34,56 @@ public class DBConfig extends Config {
     protected void initialize(ModuleContext context, String name) {
         this.context = context;
         this.name = name;
-        this.database = createDatabase();
+
+        var database = new DatabaseImpl("db" + (name == null ? "" : "-" + name));
+        context.shutdownHook.add(ShutdownHook.STAGE_6, timeout -> database.close());
+        context.backgroundTask().scheduleWithFixedDelay(database.pool::refresh, Duration.ofMinutes(10));
+        context.collector.metrics.add(new PoolMetrics(database.pool));
+        context.beanFactory.bind(Database.class, name, database);
+        this.database = database;
     }
 
     @Override
     protected void validate() {
-        if (url == null) throw new Error(format("db url must be configured, name={}", name));
+        if (url == null) throw new Error("db url must be configured, name=" + name);
         if (!entityAdded)
-            throw new Error(format("db is configured but no repository/view added, please remove unnecessary config, name={}", name));
-    }
-
-    private DatabaseImpl createDatabase() {
-        var database = new DatabaseImpl("db" + (name == null ? "" : "-" + name));
-        context.shutdownHook.add(ShutdownHook.STAGE_7, timeout -> database.close());
-        context.backgroundTask().scheduleWithFixedDelay(database.pool::refresh, Duration.ofMinutes(10));
-        context.stat.metrics.add(new PoolMetrics(database.pool));
-        context.beanFactory.bind(Database.class, name, database);
-        return database;
+            throw new Error("db is configured but no repository/view added, please remove unnecessary config, name=" + name);
     }
 
     public void url(String url) {
         if (this.url != null) throw new Error(format("db url is already configured, name={}, url={}, previous={}", name, url, this.url));
-        Vendor vendor = vendor(url);
-        database.vendor = vendor;
-        database.url(databaseURL(url, vendor));
+        database.url(databaseURL(url));
         this.url = url;
     }
 
-    String databaseURL(String url, Vendor vendor) {
+    String databaseURL(String url) {
         return url;
     }
 
-    private Vendor vendor(String url) {
-        if (url.startsWith("jdbc:mysql:")) {
-            return Vendor.MYSQL;
-        } else if (url.startsWith("jdbc:oracle:")) {
-            return Vendor.ORACLE;
+    public void user(String user) {
+        if (user.startsWith("iam/")) {
+            CloudAuthProvider provider = CloudAuthProvider.Provider.get();
+            if (provider == null) {
+                provider = provider(user);
+                CloudAuthProvider.Provider.set(provider);
+            }
+            database.authProvider = provider;
+            context.logManager.maskFields("access_token");  // mask token from IAM http response, gcloud/azure all use JWT token
+        } else {
+            database.user = user;
         }
-        throw new Error(format("not supported database vendor, url={}", url));
     }
 
-    public void user(String user) {
-        database.user = user;
+    private CloudAuthProvider provider(String user) {
+        return switch (user) {
+            case "iam/gcloud" -> new GCloudAuthProvider();
+            case "iam/azure" -> new AzureAuthProvider();
+            case null, default -> throw new Error("unsupported cloud provider, value=" + user);
+        };
     }
 
     public void password(String password) {
         database.password = password;
-    }
-
-    public void encryptedPassword(String encryptedPassword, String privateKey) {
-        String password = Password.decrypt(encryptedPassword, privateKey);
-        password(password);
     }
 
     public void poolSize(int minSize, int maxSize) {
@@ -94,14 +94,6 @@ public class DBConfig extends Config {
         database.isolationLevel = level;
     }
 
-    public void slowOperationThreshold(Duration threshold) {
-        database.slowOperationThresholdInNanos = threshold.toNanos();
-    }
-
-    public void tooManyRowsReturnedThreshold(int threshold) {
-        database.tooManyRowsReturnedThreshold = threshold;
-    }
-
     public void longTransactionThreshold(Duration threshold) {
         database.operation.transactionManager.longTransactionThresholdInNanos = threshold.toNanos();
     }
@@ -110,20 +102,18 @@ public class DBConfig extends Config {
         database.timeout(timeout);
     }
 
-    public void batchSize(int size) {
-        database.operation.batchSize = size;
-    }
-
     public void view(Class<?> viewClass) {
-        if (url == null) throw new Error(format("db url must be configured first, name={}", name));
+        if (url == null) throw new Error("db url must be configured first, name=" + name);
         database.view(viewClass);
         entityAdded = true;
     }
 
-    public <T> void repository(Class<T> entityClass) {
-        if (url == null) throw new Error(format("db url must be configured first, name={}", name));
-        context.beanFactory.bind(Types.generic(Repository.class, entityClass), name, database.repository(entityClass));
+    public <T> Repository<T> repository(Class<T> entityClass) {
+        if (url == null) throw new Error("db url must be configured first, name=" + name);
+        Repository<T> repository = database.repository(entityClass);
+        context.beanFactory.bind(Types.generic(Repository.class, entityClass), name, repository);
         entityAdded = true;
         entityClasses.add(entityClass);
+        return repository;
     }
 }

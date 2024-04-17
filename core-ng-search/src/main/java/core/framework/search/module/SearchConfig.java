@@ -1,68 +1,72 @@
 package core.framework.search.module;
 
-import core.framework.impl.module.Config;
-import core.framework.impl.module.ModuleContext;
-import core.framework.impl.module.ShutdownHook;
+import core.framework.internal.module.Config;
+import core.framework.internal.module.ModuleContext;
+import core.framework.internal.module.ShutdownHook;
 import core.framework.search.ElasticSearch;
 import core.framework.search.ElasticSearchType;
+import core.framework.search.impl.ElasticSearchHost;
 import core.framework.search.impl.ElasticSearchImpl;
-import core.framework.search.impl.log.ESLoggerContextFactory;
 import core.framework.util.Types;
 
 import java.time.Duration;
-
-import static core.framework.util.Strings.format;
 
 /**
  * @author neo
  */
 public class SearchConfig extends Config {
     ElasticSearchImpl search;
+    boolean auth;
     private ModuleContext context;
+    private String name;
     private boolean typeAdded;
 
     @Override
     protected void initialize(ModuleContext context, String name) {
-        if (name != null) throw new Error(format("search does not support multiple instances, name={}", name));
         this.context = context;
-        configureLogger();
-        search = createElasticSearch(context);
-        context.beanFactory.bind(ElasticSearch.class, null, search);
+        this.name = name;
+
+        var search = new ElasticSearchImpl();
+        context.startupHook.initialize.add(search::initialize);
+        context.shutdownHook.add(ShutdownHook.STAGE_6, timeout -> search.close());
+        context.beanFactory.bind(ElasticSearch.class, name, search);
+        this.search = search;
     }
 
     @Override
     protected void validate() {
-        if (search.host == null) throw new Error("search host must be configured");
+        if (search.hosts == null) throw new Error("search host must be configured, name=" + name);
         if (!typeAdded)
-            throw new Error("elasticsearch is configured but no type added, please remove unnecessary config");
+            throw new Error("search is configured but no type added, please remove unnecessary config, name=" + name);
+        if (!auth) { // skip probe if auth has been configured, most likely it isn't deployed in kube env
+            context.probe.urls.add(search.hosts[0].toURI() + "/_cluster/health?local=true");      // in kube env, it's ok to just check first pod of stateful set
+        }
     }
 
+    // comma separated uris
     public void host(String host) {
-        search.host = host;
+        search.hosts = ElasticSearchHost.parse(host);
     }
 
-    private ElasticSearchImpl createElasticSearch(ModuleContext context) {
-        var search = new ElasticSearchImpl();
-        context.startupHook.add(search::initialize);
-        context.shutdownHook.add(ShutdownHook.STAGE_7, timeout -> search.close());
-        return search;
+    public void auth(String apiKeyId, String apiKeySecret) {
+        search.auth(apiKeyId, apiKeySecret);
+        auth = true;
     }
 
-    void configureLogger() {
-        System.setProperty("log4j2.loggerContextFactory", ESLoggerContextFactory.class.getName());
-    }
-
-    public void slowOperationThreshold(Duration threshold) {
-        search.slowOperationThreshold = threshold;
+    // refer to https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules.html#index-max-result-window
+    // this config should match index.max_result_window
+    public void maxResultWindow(int maxResultWindow) {
+        search.maxResultWindow = maxResultWindow;
     }
 
     public void timeout(Duration timeout) {
         search.timeout = timeout;
     }
 
-    public <T> void type(Class<T> documentClass) {
+    public <T> ElasticSearchType<T> type(Class<T> documentClass) {
         ElasticSearchType<T> searchType = search.type(documentClass);
-        context.beanFactory.bind(Types.generic(ElasticSearchType.class, documentClass), null, searchType);
+        context.beanFactory.bind(Types.generic(ElasticSearchType.class, documentClass), name, searchType);
         typeAdded = true;
+        return searchType;
     }
 }

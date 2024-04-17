@@ -1,8 +1,8 @@
 package core.framework.internal.log.appender;
 
-import core.framework.internal.log.message.ActionLogMessage;
-import core.framework.internal.log.message.PerformanceStat;
-import core.framework.internal.log.message.StatMessage;
+import core.framework.log.message.ActionLogMessage;
+import core.framework.log.message.PerformanceStatMessage;
+import core.framework.log.message.StatMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -36,23 +36,25 @@ class ConsoleAppenderTest {
         action.result = "OK";
         action.action = "action";
         action.correlationIds = List.of("refId1", "refId2");
-        action.context = Map.of("context", "value");
+        action.context = Map.of("context", List.of("value"));
         action.performanceStats = Map.of("db", perf(100, 1, 0), "redis", perf(120, 0, 1));
         action.clients = List.of("service");
         action.refIds = List.of("refId3");
-        action.stats = Map.of("stat", 1.0);
+        action.stats = Map.of("cpu_time", 100.0);
+        action.elapsed = 100L;
 
         String message = appender.message(action);
         assertThat(message)
                 .contains("| OK |")
-                .contains("| correlationId=refId1,refId2 |")
+                .contains("| elapsed=100 |")
+                .contains("| correlation_id=refId1,refId2 |")
                 .contains("| action=action |")
                 .contains("| context=value |")
                 .contains("| client=service |")
-                .contains("| refId=refId3 |")
-                .contains("| stat=1.0 |")
-                .contains("| dbCount=1 | dbReads=1 | dbWrites=0 | dbElapsed=100")
-                .contains("| redisCount=1 | redisReads=0 | redisWrites=1 | redisElapsed=120");
+                .contains("| ref_id=refId3 |")
+                .contains("| cpu_time=100 |")
+                .contains("| db_count=1 | db_reads=1 | db_writes=0 | db_elapsed=100")
+                .contains("| redis_count=1 | redis_reads=0 | redis_writes=1 | redis_elapsed=120");
     }
 
     @Test
@@ -60,15 +62,17 @@ class ConsoleAppenderTest {
         var stat = new StatMessage();
         stat.date = Instant.now();
         stat.stats = Map.of("thread_count", 10.0, "cpu_usage", 0.01);
+        stat.info = Map.of("info", "text");
 
         String message = appender.message(stat);
         assertThat(message)
-                .contains("| thread_count=10.000000000")
-                .contains("| cpu_usage=0.010000000");
+                .contains("| thread_count=10")
+                .contains("| cpu_usage=0.01")
+                .contains("| info=text");
     }
 
-    private PerformanceStat perf(long elapsed, int read, int write) {
-        PerformanceStat stat = new PerformanceStat();
+    private PerformanceStatMessage perf(long elapsed, int read, int write) {
+        PerformanceStatMessage stat = new PerformanceStatMessage();
         stat.count = 1;
         stat.totalElapsed = elapsed;
         stat.readEntries = read;

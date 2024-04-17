@@ -1,12 +1,14 @@
 package core.framework.json;
 
 import core.framework.api.json.Property;
+import core.framework.api.validate.NotNull;
 import core.framework.util.Lists;
 import core.framework.util.Maps;
 
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
@@ -15,14 +17,25 @@ import java.util.Map;
  * @author neo
  */
 public class TestBean {
+    @NotNull
     @Property(name = "map")
-    public final Map<String, String> mapField = Maps.newHashMap();
+    public Map<String, String> mapField = Maps.newHashMap();
 
+    @NotNull
+    @Property(name = "enumMap")
+    public Map<TestEnum, String> enumMapField = Maps.newEnumMap(TestEnum.class);
+
+    @NotNull
+    @Property(name = "listMap")
+    public Map<String, List<String>> mapListField = Maps.newHashMap();
+
+    @NotNull
     @Property(name = "list")
-    public final List<String> listField = Lists.newArrayList();
+    public List<String> listField = Lists.newArrayList();
 
+    @NotNull
     @Property(name = "children")
-    public final List<Child> childrenField = Lists.newArrayList();
+    public List<Child> childrenField = Lists.newArrayList();
 
     @Property(name = "child")
     public Child childField;
@@ -42,14 +55,16 @@ public class TestBean {
     @Property(name = "instant")
     public Instant instantField;
 
+    @Property(name = "time")
+    public LocalTime timeField;
+
     @Property(name = "enum")
     public TestEnum enumField;
-
-    public Integer notAnnotatedField;
 
     @Property(name = "empty")
     public Empty empty;
 
+    @NotNull
     @Property(name = "defaultValue")
     public String defaultValueField = "defaultValue";
 
@@ -58,6 +73,7 @@ public class TestBean {
         A,
         @Property(name = "B1")
         B,
+        @Property(name = "C")
         C
     }
 
@@ -67,6 +83,9 @@ public class TestBean {
 
         @Property(name = "long")
         public Long longField;
+
+        @Property(name = "double")
+        public Double doubleField;
     }
 
     public static class Empty {
